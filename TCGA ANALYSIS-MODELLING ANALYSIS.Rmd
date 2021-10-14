@@ -1,0 +1,200 @@
+---
+title: "TCGA ANALYSIS-MODELLING ANALYSIS"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## MODELLING ANALYSIS
+
+_Having analysed the multiple datasets visually, it is now important to conduct analysis using proteomic expressions and possibly the factor variables in the clinical data to further our investigation into predictive modelling. I have made this new markdown as to not overload the viewer by conducting the entire project over one markdown file._
+
+
+```{r}
+library(readr)
+library(ggplot2)
+library(ggdendro)
+library(tidyr)
+library(dplyr)
+library(ggthemes)
+library(ggalt)
+library(ggfortify)
+```
+
+
+
+```{r}
+clinical_data <- read.csv("clinical_data.csv")
+cancer_data <- read_csv("cancer_data.csv")
+cancer_data1 <- read_csv("cancer_data1.csv")
+proteomes_data <- read_csv("proteomes_data.csv")
+proteomes_data_untouched <- read_csv("proteomes_data_untouched.csv")
+
+#Importing all cleaned and raw data from previous markdown, ready for analysis. 
+```
+
+```{r}
+tail((cancer_data1)) 
+
+sum(is.na(cancer_data1))
+
+
+#Quickly rechecking the data, there appears to be completely random variables for the 80 TCGA patient IDs, zero NA values and all the columns are numbered chronologically. Now we can initialise our predictive modelling and any required analysis along with it. HOWEVER, an issue has occurred, there is a new column called "X1" which gives the numeral values for each TCGA ID. This should not be included in the dataset as the numbers merely represent the dimensions of the data rather than actuall being a data value. 
+```
+
+```{r}
+
+cancer_data1 <- cancer_data1[, 2:8672] #Removing X1
+cancer_data <- cancer_data[, 2:12583] #Removing X1
+clinical_data <- clinical_data[, 2:30] #Removing X1
+proteomes_data <- proteomes_data[, 2:12555] #Removing X1
+proteomes_data_untouched <- proteomes_data_untouched[, 2:87] #Removing X1
+
+tail((cancer_data1))
+tail(cancer_data)
+tail(clinical_data)
+tail(proteomes_data)
+tail(proteomes_data_untouched)
+
+#All X1 columns are gone.
+```
+
+
+```{r}
+#Having finished with clustering visualisations in the previous markdown, it would be fairly important to conduct prinicipal component analysis first, considering we want to analyse any relationship within the proteomes and moreover which proteomes will end up having the greatest effect on the data. Although this would be considered exploratory analysis, this remains far more insightful for modelling analysis as it tells us the trends within the variation of the data which will tell us more about predictive modelling selection rather than the overall insights we can gather through visualisation. In this way, principal component analysis acts as a great segue from exploratory visualisaiton to predictive modelling
+
+#PCA is extremely helpful for datasets with samples of multiple variables. Since we have over 8000, all being numeric, this is the perfect analysis to conduct. Principal components are effectively the underlying structure of the data, and we can use it to find the overall shape of the datapoints being represented and what variation within the data can be resembled through a simple regression line or scatter plot. Since it's a form of linear transformation, this means that many values which are similar or correlated will correlate to the same principal components. In other words, the data can be 'summarised' through its principal components, in which all its variance can be accounted for, meaning that relationships can also be identified. PCA is extremely helpful in further clustering analysis and finding relationships between variables. Considering our objective is to best predict cancer types, this is extremely suitable.
+
+cancer_data1_pca <- prcomp(cancer_data1[, 2:8671]) #include only numerics, don't need TCGA ID
+
+names(cancer_data1_pca)
+
+#Let's make sense of these values. Center refers to the center point of the principal component (PC), sdev refers to its standard deviation while scale is the scaling of the PC. Rotation indicates the relationship (correlation) between the initial original values and its principal components while x refers to the sample value of the components relative to their initial values. 
+#https://www.datacamp.com/community/tutorials/pca-analysis-r
+```
+
+```{r}
+#Plotting PCA: 
+
+cancer_data_pc <- data.frame(cancer_data1_pca$x, Subtype = cancer_data$PAM50.mRNA)
+
+cancer_Basal <- cancer_data_pc[cancer_data_pc$Subtype == "Basal-like", ] #subsetting each type of cancer
+cancer_LumA <- cancer_data_pc[cancer_data_pc$Subtype == "Luminal A", ]
+cancer_LumB <- cancer_data_pc[cancer_data_pc$Subtype == "Luminal B", ]
+cancer_HER2 <- cancer_data_pc[cancer_data_pc$Subtype == "HER2-enriched", ]
+
+cancer_data_pc
+
+```
+
+```{r}
+#Before we begin, we need to analyse the variation within the datasets and see how many principal components account for the most variation.
+pca_variance <- cancer_data1_pca$sdev^2
+
+pca_variance_pcent <- round(pca_variance/sum(pca_variance) * 100, 2)
+
+
+pca_variance_pcent %>% plot( type = "l", col = "red", xlab = "Principal Component", ylab = "Variation Accounted for (Percentage)", main = "Principal Component vs % Variation")
+
+#Obviously, the first principal components will account for the most variation and with each following component it's variation decreases. Think about 'smoothing a cake', where you aim to have your first action smooth most of the cake while the following actions will deal with minor complications, the same logic applies here. Considering there are not many issues within this, we can continue with clustering
+
+```
+
+
+```{r}
+ggplot(cancer_data_pc, aes(PC1, PC2, col = Subtype)) +
+  geom_point(aes(shape = Subtype), size = 4) +
+  coord_cartesian(xlim = 1.5 * c(min(cancer_data_pc$PC1), max(cancer_data_pc$PC1)),
+                  ylim = 1.5 * c(min(cancer_data_pc$PC2), max(cancer_data_pc$PC2))) +
+    geom_encircle(data = cancer_Basal, aes(x=PC1, y=PC2)) +   # draw circles
+   geom_encircle(data = cancer_LumA, aes(x=PC1, y=PC2)) + 
+   geom_encircle(data = cancer_LumB, aes(x=PC1, y=PC2)) +
+     geom_encircle(data = cancer_HER2, aes(x=PC1, y=PC2)) +
+  theme_bw() + 
+  labs(title = "Principal Component Analysis of Cancer Subtypes (PC1 vs PC2)",
+       x = paste0("PC1 - ", pca_variance_pcent[1], " % (variation accounted)"),
+       y = paste0("PC2 - ", pca_variance_pcent[2], " % (variation accounted)"))
+  
+#Taking a look at this PCA chart, there appears to be a strong clustering of each subtypes near the middle, and within each cluster there are multiple overlappings which could indicate some strong relationships and similar variation within each subtype. This could benefit health professionals as the values are similar, but the predictive modelling will be far more difficult (trivially, predicting similarity at such a small scale will be hard than clusters which are obviously different). 
+
+#More sepcifcally, HER2-enriched and Luminal A clusters appear nearly the same shape, Basal-like is generally the highest value while Luminal B contains some of the lowest value principal components, which exist outside the clusters of the other subtypes. Overall however, there appears to be many samples that fit many variables within the datapoints. Let's try PC3 vs PC4. Although PC1 vs PC2 charts are always the most significant (as they account for over 20% of the data's variation), it's still important to check a few more cluster plots to identify any smaller or more subtle relationships within each cancer subtype cluster.
+```
+
+```{r}
+ggplot(cancer_data_pc, aes(PC3, PC4, col = Subtype)) +
+  geom_point(aes(shape = Subtype), size = 4) +
+  coord_cartesian(xlim = 1.5 * c(min(cancer_data_pc$PC3), max(cancer_data_pc$PC3)),
+                  ylim = 1.5 * c(min(cancer_data_pc$PC4), max(cancer_data_pc$PC4))) +
+    geom_encircle(data = cancer_Basal, aes(x=PC3, y=PC4)) +   # draw circles
+   geom_encircle(data = cancer_LumA, aes(x=PC3, y=PC4)) + 
+   geom_encircle(data = cancer_LumB, aes(x=PC3, y=PC4)) +
+     geom_encircle(data = cancer_HER2, aes(x=PC3, y=PC4)) +
+  theme_bw() + 
+  labs(title = "Principal Component Analysis of Cancer Subtypes (PC3 vs PC4)",
+              x = paste0("PC3 - ", pca_variance_pcent[3], " % (variation accounted)"),
+       y = paste0("PC4 - ", pca_variance_pcent[4], " % (variation accounted)"))
+
+#The clusters seem to still overlap quite heavily. HER2-enriched has far more variation but still has most of it's values overlapping within other clusters. Moreover, Basal-like and Luminal-A appear almost identical, which is quite a significant observation since the PC1 vs PC2 chart showed they were quite similar in shape but different in values. Let's compare a few more principal component values.
+```
+
+```{r}
+ggplot(cancer_data_pc, aes(PC5, PC6, col = Subtype)) +
+  geom_point(aes(shape = Subtype), size = 4) +
+  coord_cartesian(xlim = 1.5 * c(min(cancer_data_pc$PC5), max(cancer_data_pc$PC5)),
+                  ylim = 1.5 * c(min(cancer_data_pc$PC6), max(cancer_data_pc$PC6))) +
+    geom_encircle(data = cancer_Basal, aes(x=PC5, y=PC6)) +   # draw circles
+   geom_encircle(data = cancer_LumA, aes(x=PC5, y=PC6)) + 
+   geom_encircle(data = cancer_LumB, aes(x=PC5, y=PC6)) +
+     geom_encircle(data = cancer_HER2, aes(x=PC5, y=PC6)) +
+  theme_bw() + 
+  labs(title = "Principal Component Analysis of Cancer Subtypes (PC5 vs PC6)",
+              x = paste0("PC5 - ", pca_variance_pcent[5], " % (variation accounted)"),
+       y = paste0("PC6 - ", pca_variance_pcent[6], " % (variation accounted)"))
+      
+
+
+#This PCA Cluster plot shows fairly similar results than the previous PCA plots. HER2-enriched again shares an extremely similar variation values and cluster shape as the Luminal-A subtype. Could these two cancer subtypes be heavily linked? 
+```
+
+```{r}
+#A dendogram will be another useful PCA visualisation to analyse the group relationships within each principal component. This is useful for hierarchal clustering.
+
+hierarchalclust <- hclust(dist(as.matrix(cancer_data1_pca$x)), method = 'complete')
+
+hierarchalclust %>% ggdendrogram(rotate = TRUE, size = 8)
+
+#There are too many principal components to make a meaninful analysis. Let's pick the first 10 and then replot.
+```
+
+```{r}
+hierarchalclust1 <- hclust(dist(as.matrix(cancer_data1_pca$x[1:10,])), method = 'complete')
+
+hierarchalclust1 %>% ggdendrogram(rotate = TRUE, size = 8)
+
+#We can see that there are is some grouping across all levels of data. PC1 is most grouped to PCA10, PCA 2 to PCA 8, PCA 5 to PCA 9 and so forth. PCA 4 and PCA 6 appear to be the least grouped as their lines are not split multipel times. Dendograms show hierarchal relationships within each dataset. The x-axis stretched to a length of 200 because the values are quite similar. These plots don't tell us how many clusters we should have, but rather tell us how to visualise the distance between principal component values. In this specific instace, we would see PC1 (1 on the y-axis) being the furtherest away from PC7 on a plot.
+```
+
+```{r}
+#Finally, let's re-do the PC1 vs PC2 chart as points on a plot, rather than clusters. This is just to follow the logic of dendograms not telling us about cluster selection, but rather confirming whether the clusters do fit the values properly.
+
+ggplot(cancer_data_pc, aes(PC1, PC2, col = Subtype)) +
+  geom_point() +
+  labs(title = "Principal Component Analysis of Cancer Subtypes (PC1 vs PC2)",
+       x = paste0("PC1 - ", pca_variance_pcent[1], " % (variation accounted)"),
+       y = paste0("PC2 - ", pca_variance_pcent[2], " % (variation accounted)"))
+
+#We can now see that the clustering did a great job at grouping together the values. Basal appears in it's own cluster, Luminal B appears in it's own too while Luminal A and HER2-enriched data points appear very similarly, and hence are overlapping as shown in the PCA cluster plots.
+```
+
+
+_We have now completed our first significant step in identifying variation within the data using principal component analysis. These will be useful figures to include in my final observations and report._
+
+
+
+
+
+
+
+
