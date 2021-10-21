@@ -3,6 +3,8 @@ title: "TCGA Analysis - Clinical Data"
 author: "Jeevanpreet Singh"
 date: "26/04/2021"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 
@@ -63,6 +65,61 @@ names(clinical_data)<-str_replace_all(names(clinical_data), c(" " = "." , "," = 
 
 #Data Visualisation
 
+
+
+```{r}
+plot_boxplot(clinical_data, "PAM50.mRNA")
+
+#This boxplot demonstrates the spread of values across different variables according to the subtype. The values here are of not much use, but we can see that age of diagnosis is earlier for basal-like while luminal and HER2-enriched cancer types have a similar mean and inter-quartile range.
+```
+```{r}
+clinical_data %>% ggplot(aes(x = PAM50.mRNA, y = Age.at.Initial.Pathologic.Diagnosis, colour = PAM50.mRNA)) +
+  geom_boxplot() +
+  labs(x = "Cancer Subtype", y = "Diagnosis Age", title = "Boxplot of Cancer Subtypes by Diagnosis Age")
+
+#The boxplot confirms fair similarity within the subtypes. Through boxplots we can generate a lot of detail regarding what the data offers. Each section of the box and whisker plot displays 25% of the data, the whiskers being the lines at the end and the box being the white-space contained within the whiskers. Within the box is one distinct line that represents the median of values. Hence, the lines at the lower and upper end of the box are considered inter-quartile ranges, from 25% to 75%, thus 50% of the values are represented within the box and the other 50 within the whiskers. 
+
+#We can determine that he HER2-enriched cancer exression within the dataset is relatively normally distributed, hence why the median is near the middle of the box (assume middle of box is mean as it's directly between 25% and 75%). However, Luminal subtypes both appear to be right skewed, indicating that most cases will have a higher diagnosis age on average. Basal-like, however, is left-skewed, indicating a lower diagnosis age, however one outlier does exist. We won't consider removing this, since diagnosis age can be random for this kind of situation. 
+
+#This visualisation indicates that determining cancer subtypes and proteomic expressions are essential, as it may lead to earlier diagnosis for basal-like subtype patients, not dependent on the overall diagnosis age of all other subtypes. 
+
+#Let's determine if cancer stages provide a similar insight. Stages and subtypes differ in that stages show the development of cancer while subtypes (PAM50.mRNA) reflect the proteomic expression of the cancer. They are entirely different, but could be correlated.
+```
+
+```{r}
+clinical_data %>% ggplot(aes(x = AJCC.Stage, y = Age.at.Initial.Pathologic.Diagnosis, colour = AJCC.Stage)) +
+  geom_boxplot() +
+  labs(x = "AJCC Stage", y = "Diagnosis Age", title = "Boxplot of Cancer Stage by Diagnosis Age") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+
+#There is much more variation within the cancer stages. Stage 1 cancers can be identified much later throughout life, but stage 2 and stage 3 cancers are relatively found and middle-age period (50-65). Stage 4 however appears to have a diagnosis at a later age too. Considering the wide spread of the data and small sample within the dataset, it's impossible to consider any insights by this visualisation alone. A much better insight could be gathered within a dataset of 10000 samples rather than the 108 that we currently have. However, due to data access limitations and processing power, this may not be reproduced effectively.
+```
+
+```{r}
+clinical_data %>% ggplot(aes(x = ER.Status, y = Age.at.Initial.Pathologic.Diagnosis, colour = ER.Status)) +
+  geom_boxplot() +
+  labs(x = "Estrogen Status", y = "Diagnosis Age", title = "Boxplot of Estrogen by Diagnosis Age") 
+
+
+
+#READ FOLLOWING BOXPLOT FOR COMPARISON BETWEEN ESTROGEN AND PROGESTERONE COMPARISONS
+```
+
+```{r}
+clinical_data %>% ggplot(aes(x = PR.Status, y = Age.at.Initial.Pathologic.Diagnosis, colour = PR.Status)) +
+  geom_boxplot() +
+  labs(x = "Progesterone Status", y = "Diagnosis Age", title = "Boxplot of Progesterone by Diagnosis Age") 
+
+
+#Estrogen (ER) and progesterone (PR) are hormones, however hormones can have huge influence on cancer diagnosis. We can determine through both boxplots that their distributions are extremely similar. Both ER and PR negative status samples contain a left skew and overall lower distribution than the positive status samples. This could imply that hormones may play a part in 'delaying' the diagnosis of cancer within patients. Considering, however, that our focus lies mainly within subtypes, this does not tell us much in regards to proteomic prediction (predicting the cancer by protein expression).
+```
+
+
+
+
+
+
+
 ```{r}
 ggplot(data = clinical_data, aes(x=PAM50.mRNA, fill = Gender)) + geom_bar() + labs (x="Breast Cancer Types", y = "Sum", title = "Breast Cancer Types")
 ```
@@ -89,7 +146,7 @@ ggplot(data = clinical_data, aes(x=PAM50.mRNA, fill = Tumor)) + geom_bar(alpha =
 ```
 
 ```{r}
-ggplot(data = clinical_data, aes(x=PAM50.mRNA, fill = AJCC.Stage)) + geom_bar(alpha = 0.9) + labs (x="Breast Cancer Types", y = "Sum", title = "Breast Cancer Types")  
+ggplot(data = clinical_data, aes(x=PAM50.mRNA, fill = AJCC.Stage)) + geom_bar(alpha = 0.9) + labs (x="Breast Cancer Types (PAM50 classification)", y = "Total", title = "Breast Cancer Subtypes")  
 
 #Stage 2 remains the most common within the dataset, while stage four is evidently the least common except for the luminal B cancer type. Using some final visualisations, we should be able to conclude that AJCC is a better indicator for cancer stages.
 ```
@@ -260,8 +317,7 @@ clinical_data$PAM50.mRNA <- as.character(clinical_data$PAM50.mRNA)
 
 SubtypedPlotmiRNAmethylClusters <- clinical_data %>%
             ggplot(aes(miRNA.Clusters, methylation.Clusters, color = PAM50.mRNA)) +
-            geom_point(position = position_jitter(seed=123),
-                       shape = 1) +
+            geom_point(position = position_jitter(seed=123)) +
             facet_wrap(~ PAM50.mRNA) +
             theme_classic() +
   labs(x = "miRNA Clustering",
@@ -426,7 +482,7 @@ cancer_data1 <- cancer_data[0:12554]
 #This will be useful for our actual analysis of protein expressions.
 
 sum(is.na(cancer_data1))
-sum(is.na(cancer_data1$NP_219494)/length(cancer_data1$NP_219494)) 
+sum(is.na(cancer_data1$NP_219494)/length(cancer_data1$NP_219494)) #let's check NA for one random proteome
 
 
 naVals <- colSums(is.na(cancer_data1)) / nrow(cancer_data1)
@@ -567,7 +623,7 @@ clinical_data %>%
 
 #This visualisation demonstrates that the significant clusters are also quite consistent, there is a lot of overlapping within the clusters, meaning there could be relationships. These kind of analyses can help in dictating how medication can be described across multiple subtypes considering similar molecular composition. However, Principal Component analysis (PCA) will further analyse this).
 ```
-_Having written nearly 600 lines of code and identifying as much as I could, I can now approach the modelling aspect of this project. We should begin with PCA as a segue, but first let's export all datasets within the global environment as CSV files and have them saved in the same directory._
+_Having written over 600 lines of code and identifying as much as I could, I can now approach the modelling aspect of this project. We should begin with PCA as a segue, but first let's export all datasets within the global environment as CSV files and have them saved in the same directory._
 
 
 ```{r}
