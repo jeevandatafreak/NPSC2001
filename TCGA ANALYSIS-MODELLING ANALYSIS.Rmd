@@ -1,0 +1,1159 @@
+---
+title: "TCGA ANALYSIS-MODELLING ANALYSIS"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## MODELLING ANALYSIS
+
+_Having analysed the multiple datasets visually, it is now important to conduct analysis using proteomic expressions and possibly the factor variables in the clinical data to further our investigation into predictive modelling. I have made this new markdown as to not overload the viewer by conducting the entire project over one markdown file._
+
+
+```{r}
+library(readr)
+library(ggplot2)
+library(ggdendro)
+library(tidyr)
+library(dplyr)
+library(ggthemes)
+library(ggalt)
+library(ggfortify)
+library(caret)
+library(parallel)
+library(doParallel)
+library(survival)
+library(survminer)
+library(factoextra)
+library(pROC)
+library(PRROC)
+library(MASS)
+```
+
+
+
+```{r}
+clinical_data <- read.csv("clinical_data.csv")
+cancer_data <- read_csv("cancer_data.csv")
+cancer_data1 <- read_csv("cancer_data1.csv")
+proteomes_data <- read_csv("proteomes_data.csv")
+proteomes_data_untouched <- read_csv("proteomes_data_untouched.csv")
+
+#Importing all cleaned and raw data from previous markdown, ready for analysis. 
+```
+
+```{r}
+tail((cancer_data1)) 
+
+sum(is.na(cancer_data1))
+
+
+#Quickly rechecking the data, there appears to be completely random variables for the 80 TCGA patient IDs, zero NA values and all the columns are numbered chronologically. Now we can initialise our predictive modelling and any required analysis along with it. HOWEVER, an issue has occurred, there is a new column called "X1" which gives the numeral values for each TCGA ID. This should not be included in the dataset as the numbers merely represent the dimensions of the data rather than actually being a data value. 
+```
+
+
+```{r}
+
+cancer_data1 <- cancer_data1[, 2:8672] #Removing X1
+cancer_data <- cancer_data[, 2:12583] #Removing X1
+clinical_data <- clinical_data[, 2:30] #Removing X1
+proteomes_data <- proteomes_data[, 2:12555] #Removing X1
+proteomes_data_untouched <- proteomes_data_untouched[, 2:87] #Removing X1
+
+tail((cancer_data1))
+tail(cancer_data)
+tail(clinical_data)
+tail(proteomes_data)
+tail(proteomes_data_untouched)
+
+#All X1 columns are gone.
+```
+
+
+```{r}
+#Having finished with clustering visualisations in the previous markdown, it would be fairly important to conduct prinicipal component analysis first, considering we want to analyse any relationship within the proteomes and moreover which proteomes will end up having the greatest effect on the data. Although this would be considered exploratory analysis, this remains far more insightful for modelling analysis as it tells us the trends within the variation of the data which will tell us more about predictive modelling selection rather than the overall insights we can gather through visualisation. In this way, principal component analysis acts as a great segue from exploratory visualisaiton to predictive modelling
+
+#PCA is extremely helpful for datasets with samples of multiple variables. Since we have over 8000, all being numeric, this is the perfect analysis to conduct. Principal components are effectively the underlying structure of the data, and we can use it to find the overall shape of the datapoints being represented and what variation within the data can be resembled through a simple regression line or scatter plot. Since it's a form of linear transformation, this means that many values which are similar or correlated will correlate to the same principal components. In other words, the data can be 'summarised' through its principal components, in which all its variance can be accounted for, meaning that relationships can also be identified. PCA is extremely helpful in further clustering analysis and finding relationships between variables. Considering our objective is to best predict cancer types, this is extremely suitable.
+
+cancer_data1_pca <- prcomp(cancer_data1[, 2:8671]) #include only numerics, don't need TCGA ID
+
+names(cancer_data1_pca)
+
+#Let's make sense of these values. Center refers to the center point of the principal component (PC), sdev refers to its standard deviation while scale is the scaling of the PC. Rotation indicates the relationship (correlation) between the initial original values and its principal components while x refers to the sample value of the components relative to their initial values. 
+#https://www.datacamp.com/community/tutorials/pca-analysis-r
+```
+
+```{r}
+#Plotting PCA: 
+
+
+cancer_data_pc <- data.frame(cancer_data1_pca$x, Subtype = cancer_data$PAM50.mRNA)
+
+cancer_Basal <- cancer_data_pc[cancer_data_pc$Subtype == "Basal-like", ] #subsetting each type of cancer
+cancer_LumA <- cancer_data_pc[cancer_data_pc$Subtype == "Luminal A", ]
+cancer_LumB <- cancer_data_pc[cancer_data_pc$Subtype == "Luminal B", ]
+cancer_HER2 <- cancer_data_pc[cancer_data_pc$Subtype == "HER2-enriched", ]
+
+cancer_data_pc
+
+
+```
+
+```{r}
+#Before we begin, we need to analyse the variation within the datasets and see how many principal components account for the most variation.
+pca_variance <- cancer_data1_pca$sdev^2
+
+
+pca_variance_pcent <- round(pca_variance/sum(pca_variance) * 100, 2)
+
+
+pca_variance_pcent %>% plot( type = "l", col = "orange", xlab = "Principal Component", ylab = "Variation Accounted for (Percentage)", main = "Principal Component vs % Variation")
+
+#Obviously, the first principal components will account for the most variation and with each following component it's variation decreases. Think about 'smoothing a cake', where you aim to have your first action smooth most of the cake while the following actions will deal with minor complications, the same logic applies here. Considering there are not many issues within this, we can continue with clustering
+
+```
+
+```{r}
+fviz_eig(cancer_data1_pca, 
+         addlabels=TRUE, 
+         ylim=c(0,100), 
+         geom= c("bar", "line"), 
+         barfill="blue", 
+         barcolor="black", 
+         linecolor="purple", 
+         ncp=15, labelsize = 13, repel = TRUE)
+
+#Effecitvely after the seventh principal component, the percentage slightly decreases, all the way to the 81st.
+```
+
+```{r}
+cancer_data1_pca %>% fviz_pca_ind(col.ind = "cos2") + scale_color_gradient2(low="cyan", mid="blue",
+      high="black", midpoint=0.6)+ theme_minimal()
+```
+
+```{r}
+fviz_pca_ind(cancer_data1_pca, geom.ind = "point", pointshape = 21, 
+             pointsize = 1.5, 
+             fill.ind = cancer_data2$Subtype, 
+             col.ind = cancer_data2$Subtype, 
+             palette = "BrBG", 
+             addEllipses = TRUE,
+             label = "var",
+             col.var = "blue",
+             repel = TRUE,
+             legend.title = "Subtype") +
+  ggtitle("2D PCA-plot from 80 components") 
+```
+
+
+
+
+
+```{r}
+ggplot(cancer_data_pc, aes(PC1, PC2, col = Subtype)) +
+  geom_point(aes(shape = Subtype), size = 4) +
+  coord_cartesian(xlim = 1.5 * c(min(cancer_data_pc$PC1), max(cancer_data_pc$PC1)),
+                  ylim = 1.5 * c(min(cancer_data_pc$PC2), max(cancer_data_pc$PC2))) +
+    geom_encircle(data = cancer_Basal, aes(x=PC1, y=PC2)) +   # draw circles
+   geom_encircle(data = cancer_LumA, aes(x=PC1, y=PC2) ) + 
+   geom_encircle(data = cancer_LumB, aes(x=PC1, y=PC2)) +
+     geom_encircle(data = cancer_HER2, aes(x=PC1, y=PC2)) +
+  theme_minimal() + 
+  labs(title = "Principal Component Analysis of Cancer Subtypes", #shortened for exporting (for poster)
+       x = paste0("PC1 - ", pca_variance_pcent[1], " % (variation accounted)"),
+       y = paste0("PC2 - ", pca_variance_pcent[2], " % (variation accounted)"))
+  
+#Taking a look at this PCA chart, there appears to be a strong clustering of each subtypes near the middle, and within each cluster there are multiple overlappings which could indicate some strong relationships and similar variation within each subtype. This could benefit health professionals as the values are similar, but the predictive modelling will be far more difficult (trivially, predicting similarity at such a small scale will be hard than clusters which are obviously different). 
+
+#More sepcifcally, HER2-enriched and Luminal A clusters appear nearly the same shape, Basal-like is generally the highest value while Luminal B contains some of the lowest value principal components, which exist outside the clusters of the other subtypes. Overall however, there appears to be many samples that fit many variables within the datapoints. Let's try PC3 vs PC4. Although PC1 vs PC2 charts are always the most significant (as they account for over 20% of the data's variation), it's still important to check a few more cluster plots to identify any smaller or more subtle relationships within each cancer subtype cluster.
+```
+
+```{r}
+ggplot(cancer_data_pc, aes(PC3, PC4, col = Subtype)) +
+  geom_point(aes(shape = Subtype), size = 4) +
+  coord_cartesian(xlim = 1.5 * c(min(cancer_data_pc$PC3), max(cancer_data_pc$PC3)),
+                  ylim = 1.5 * c(min(cancer_data_pc$PC4), max(cancer_data_pc$PC4))) +
+    geom_encircle(data = cancer_Basal, aes(x=PC3, y=PC4)) +   # draw circles
+   geom_encircle(data = cancer_LumA, aes(x=PC3, y=PC4)) + 
+   geom_encircle(data = cancer_LumB, aes(x=PC3, y=PC4)) +
+     geom_encircle(data = cancer_HER2, aes(x=PC3, y=PC4)) +
+  theme_bw() + 
+  labs(title = "Principal Component Analysis of Cancer Subtypes (PC3 vs PC4)",
+              x = paste0("PC3 - ", pca_variance_pcent[3], " % (variation accounted)"),
+       y = paste0("PC4 - ", pca_variance_pcent[4], " % (variation accounted)"))
+
+#The clusters seem to still overlap quite heavily. HER2-enriched has far more variation but still has most of it's values overlapping within other clusters. Moreover, Basal-like and Luminal-A appear almost identical, which is quite a significant observation since the PC1 vs PC2 chart showed they were quite similar in shape but different in values. Let's compare a few more principal component values.
+```
+
+```{r}
+ggplot(cancer_data_pc, aes(PC5, PC6, col = Subtype)) +
+  geom_point(aes(shape = Subtype), size = 4) +
+  coord_cartesian(xlim = 1.5 * c(min(cancer_data_pc$PC5), max(cancer_data_pc$PC5)),
+                  ylim = 1.5 * c(min(cancer_data_pc$PC6), max(cancer_data_pc$PC6))) +
+    geom_encircle(data = cancer_Basal, aes(x=PC5, y=PC6)) +   # draw circles
+   geom_encircle(data = cancer_LumA, aes(x=PC5, y=PC6)) + 
+   geom_encircle(data = cancer_LumB, aes(x=PC5, y=PC6)) +
+     geom_encircle(data = cancer_HER2, aes(x=PC5, y=PC6)) +
+  theme_bw() + 
+  labs(title = "Principal Component Analysis of Cancer Subtypes (PC5 vs PC6)",
+              x = paste0("PC5 - ", pca_variance_pcent[5], " % (variation accounted)"),
+       y = paste0("PC6 - ", pca_variance_pcent[6], " % (variation accounted)"))
+      
+
+
+#This PCA Cluster plot shows fairly similar results than the previous PCA plots. HER2-enriched again shares an extremely similar variation values and cluster shape as the Luminal-A subtype. Could these two cancer subtypes be heavily linked? 
+```
+
+```{r}
+#Out of curiousity, let's plot the final two principal component analysis. Essentially, these are the least 'reflective' of the dimension of the data, hence it would be interesting to see if they're similar to the more representative principal components above.
+
+ggplot(cancer_data_pc, aes(PC79, PC80, col = Subtype)) +
+  geom_point(aes(shape = Subtype), size = 4) +
+  coord_cartesian(xlim = 1.5 * c(min(cancer_data_pc$PC79), max(cancer_data_pc$PC79)),
+                  ylim = 1.5 * c(min(cancer_data_pc$PC80), max(cancer_data_pc$PC80))) +
+    geom_encircle(data = cancer_Basal, aes(x=PC79, y=PC80)) +   # draw circles
+   geom_encircle(data = cancer_LumA, aes(x=PC79, y=PC80)) + 
+   geom_encircle(data = cancer_LumB, aes(x=PC79, y=PC80)) +
+     geom_encircle(data = cancer_HER2, aes(x=PC79, y=PC80)) +
+  theme_bw() + 
+  labs(title = "Principal Component Analysis of Cancer Subtypes (PC79 vs PC80)",
+              x = paste0("PC79 - ", pca_variance_pcent[79], " % (variation accounted)"),
+       y = paste0("PC80 - ", pca_variance_pcent[80], " % (variation accounted)"))
+
+
+#As shown below, the final to principal components display very largely spread values. Luminal B and luminal A appear to be quite similar while Basal-like and HER2 share some similar shape. If you look at the y axis scale, the PCA goes to values of nearly 0 (2 x 10 ^-13), essentially displaying absolute minimum variance. Essentially PCA is used to maximise variance to ensure that most data can be accounted for, but in this case it is the least and provides the least statistical information. Variance IS required to make statistical insights as it is the component that provides any comparison within the data.
+
+```
+
+
+
+
+
+```{r}
+#A dendogram will be another useful PCA visualisation to analyse the group relationships within each principal component. This is useful for hierarchal clustering.
+
+hierarchalclust <- hclust(dist(as.matrix(cancer_data1_pca$x)), method = 'complete')
+
+hierarchalclust %>% ggdendrogram(rotate = TRUE, size = 8)
+
+#There are too many principal components to make a meaninful analysis. Let's pick the first 10 and then replot.
+```
+
+```{r}
+hierarchalclust1 <- hclust(dist(as.matrix(cancer_data1_pca$x[1:10,])), method = 'complete')
+
+hierarchalclust1 %>% ggdendrogram(rotate = TRUE, size = 8)
+
+#We can see that there are is some grouping across all levels of data. PC1 is most grouped to PCA10, PCA 2 to PCA 8, PCA 5 to PCA 9 and so forth. PCA 4 and PCA 6 appear to be the least grouped as their lines are not split multipel times. Dendograms show hierarchal relationships within each dataset. The x-axis stretched to a length of 200 because the values are quite similar. These plots don't tell us how many clusters we should have, but rather tell us how to visualise the distance between principal component values. In this specific instace, we would see PC1 (1 on the y-axis) being the furtherest away from PC7 on a plot.
+```
+
+```{r}
+#Finally, let's re-do the PC1 vs PC2 chart as points on a plot, rather than clusters. This is just to follow the logic of dendograms not telling us about cluster selection, but rather confirming whether the clusters do fit the values properly.
+
+ggplot(cancer_data_pc, aes(PC1, PC2, col = Subtype)) +
+  geom_point() +
+  labs(title = "Principal Component Analysis of Cancer Subtypes (PC1 vs PC2)",
+       x = paste0("PC1 - ", pca_variance_pcent[1], " % (variation accounted)"),
+       y = paste0("PC2 - ", pca_variance_pcent[2], " % (variation accounted)"))
+
+#We can now see that the clustering did a great job at grouping together the values. Basal appears in it's own cluster, Luminal B appears in it's own too while Luminal A and HER2-enriched data points appear very similarly, and hence are overlapping as shown in the PCA cluster plots.
+```
+
+
+_We have now completed our first significant step in identifying variation within the data using principal component analysis. These will be useful figures to include in my final observations and report._
+
+
+
+_When considering prediction, it's important to recognise that there are simply a multitude of different algorithms and statistical methods that can be applied to any sort of problem, it is up to the user to distinguish which models will be most appropriate for analysis. The aim here is to save time by not having to implement fifty different predictive algorithms, but rather use extensions and packages which test the accuracy of these algorithms, then rank them by accuracy and test only the most accurate models. Not only does this save time, it gives enough valid information for the user to make an accurate judgement on what is being explored. It would be illogical to apply methods that are 99% accurate. One way to test model accuracy is through the caret package. It is the classifications and regressions training package, which intakes data and then classifies the data in different sets to test different algorithms, then the most accurate algorithms can be displayed._
+
+```{r}
+cancer_data2 <- data.frame(cancer_data1, Subtype = cancer_data$PAM50.mRNA) #Add subtype as a column to the cleaned proteome dataset, as that's our variable we're trying to predict
+
+cancer_data2[,ncol(cancer_data2)] #Confirms that we've added the column at the end.
+
+#https://statisticsglobe.com/select-last-column-of-data-frame-in-r
+```
+
+
+```{r}
+nrow(cancer_data2)
+
+#80 rows, let's find 65% of that. We aim to train 65% of our data
+
+0.65*80 #answer is 52. Hence, 52 samples will be trained, the others will be tested. Truth sample will be associated with test set
+
+
+#Testing and training data are an important aspect of predictive modelling. Training set is the set of data used to 'train' a model, while the test set is used to test the trained model. Imagine subsetting the portion of your life in which you study for a test (train your mind to learn the concepts), the final exam is your 'output' that reflects how well you trained. To split the data, there are multiple ways, I'll simply split them into random order in a 65% training/35% split and scramble the samples to ensure randomness. Two assumptions to fill is that the test data is representative enough of the full dataset and that all samples have similar characteristics, hence the 65/35 allocation and the random sampling respectively.
+```
+
+
+```{r}
+
+cancer_data3 <- cancer_data2[,-1] #remove TCGA-ID
+
+
+scrambled_index <- sample(NROW(cancer_data3)) #mix up the rows 
+scrambled_cancer<- cancer_data3[scrambled_index,] #using that index, rows should be mixed
+
+
+cancer_train <- scrambled_cancer[1:52, ] #take 52 variables for training set (65%)
+cancer_test <- scrambled_cancer[53:80, -8671] #Take the final 35%, without the subtype column
+cancer_test_truth <- scrambled_cancer[53:80, 8671] #take the subtypes
+
+cancer_test[,ncol(cancer_test)] #Checks that our final column doesn't contain subtypes
+
+cancer_test_truth #subtypes have been subsetted well
+
+#Having picked the best models, we can use these samples to set up model prediction. Let's leave these subsets for now and train the models.
+
+```
+
+
+```{r}
+#Make factor levels for subtype
+cancer_data3 %>% 
+  mutate(Subtype = factor(Subtype, 
+                        labels = make.names(levels(Subtype)))) #Make factor levels for subtype
+
+```
+
+```{r}
+#This is to speed up the process of analysis. UNNECESSARY TO RUN FOR OTHER PCs
+
+# cluster <- makeCluster(detectCores() - 1) # leave 1 core for OS
+# registerDoParallel(cluster)
+```
+
+```{r}
+myctrl <- trainControl(method = "cv",     
+                       number = 3,
+                       allowParallel = TRUE)
+
+#This is a cross validation, as utilised from the following resource. 
+#https://www.kaggle.com/chrisbow/breast-cancer-prediction-using-the-caret-package/notebook
+#That dataset, though analysing breast cancer, focuses on appearance factors rather than proteomes. Hence, the application here is different. However, the control method would be the way I'd do it. The trainControl method simply uses the cross-validation method (three-fold) to resample the data in effectively three lines. Summary and selection functions simply give the best possible resampling. Cross-validation is my preference since it's optimal for training models on limited data samples.
+
+```
+
+
+
+
+```{r}
+#LOG BOOST (as interpreted by the resource above)
+
+caret_model_logBoost <- train(Subtype ~ .,
+                     data = cancer_data3,
+                     method = "LogitBoost",
+                     metric = "Accuracy",
+                     trControl = myctrl)
+
+#This method will take a couple of minutes, considering there are so many variables to predict. Viewer should feel free to adjust the parameters as necessary. Below is the final 250 protein expressions (in terms of columns) being trained against the subtype (instead of the 8000 being run in the code above), use it below to speed up the process 
+```
+
+```{r}
+cancer_data_250proteins <- cancer_data3[,8420:8671]
+#View(cancer_data_20proteins)    remove the hashtag if you want to view in new window. 
+
+caret_model_logBoost1 <- train(Subtype ~ .,
+                     data = cancer_data_250proteins,
+                     method = "LogitBoost",
+                     metric = "Accuracy",
+                     trControl = myctrl)
+
+caret_model_logBoost1
+ggplot(caret_model_logBoost1)
+
+#Below is an identical analysis of what I've done, but using only 250 protein expressions rather than over 8000. This can be used to distinguish the process more quickly, but looking at the accuracy, it is far less than what the other log boost model predicted. It maximises at a 54% accuracy rather than the 65% accuracy of the extended dataset. Hence, use this to primarily gain an understanding of the process, do not use it's values however.
+
+#Hence, whenever there is an interesting model that the user wants tested yet is not able to run it in an efficient time, simply do the changes below
+
+#caret_model_logBoost <- train(Subtype ~ ., 
+#                     data = cancer_data3, <-change cancer_data3 to cancer_data_250proteins.
+#                     method = "LogitBoost",
+#                     metric = "Accuracy",
+#                     trControl = myctrl)
+
+```
+
+```{r}
+caret_model_logBoost
+
+ggplot(caret_model_logBoost) #plot can be insightful when compared to other models.
+
+
+#The log boost model produced an accuracy of 72% (looking at the accuracy column and picking out the highest value). This is fairly normal considering there are so many predictor proteomes. The way to interpret is that the predictors within the dataset (proteomes), trained through the specific model applied (log boost in this case), can accurately explain and predict 72% of the data being produced, more specifically by predicting them against the subtypes of cancer. So therefore it's not a way to show any subtype prediction, but displays the accuracy if it were to.
+
+#We can now try many more models but not every model. There are hundreds that can be used but for the sake of time, we will only focus on only the most popular models. 
+
+#IMPORTANT LINK!!!! https://rdrr.io/cran/caret/man/models.html <- Inside this link is an entire list of all the models that can be applied in the caret train function. User simply has to change the 'method = ' line to whichever method they'd like (abbreviations are in the link above).
+```
+
+
+
+```{r}
+#RANDOM FOREST
+
+
+caret_model_randomForest <- train(Subtype ~ .,
+                     data = cancer_data3,
+                     method = "rf", #changes to rf for random forest.
+                     metric = "Accuracy",
+                     trControl = myctrl)
+
+
+#Not much explanation has to be said about the process anymore. Discussions will be made on the accuracy results.
+```
+
+
+
+```{r}
+caret_model_randomForest
+
+ggplot(caret_model_randomForest)
+
+#Random Forest achieves a 72.6% accuracy, much better than the log boost method. 
+```
+
+
+
+
+```{r}
+
+#Linear Discriminant Analysis
+
+
+caret_model_lda <- train(Subtype ~ .,
+                     data = cancer_data3,
+                     method = "lda", #changes to lda for linear discriminant analysis
+                     metric = "accuracy",
+                     trControl = myctrl)
+
+
+
+```
+
+```{r}
+caret_model_lda
+
+#Can't plot as only one accuracy given. 65% accurate, far less than random forest but closer to log Boost 
+```
+
+
+
+```{r}
+
+# Naive Bayes
+
+
+caret_model_nb <- train(Subtype ~ .,
+                     data = cancer_data3, #REMEMBER, change to cancer_data_250proteins for faster processing
+                     method = "nb", #changes to nb for naive bayes
+                     metric = "Accuracy",
+                     trControl = myctrl)
+
+
+
+```
+
+```{r}
+caret_model_nb
+
+ggplot(caret_model_nb)
+
+#Naive Bayes generates an accuracy of 62.6%
+```
+
+
+
+
+```{r}
+# Rpart (CART Trees)
+
+
+caret_model_rpart <- train(Subtype ~ .,
+                     data = cancer_data3,
+                     method = "rpart", #changes to neural net for neural network
+                     metric = "Accuracy",
+                     trControl = myctrl)
+
+
+
+```
+
+```{r}
+caret_model_rpart
+
+ggplot(caret_model_rpart)
+
+#The Rpart analysis reproduced an accuracy of 67.4 %, fairly accurate in regards to previous models.
+```
+
+
+
+```{r}
+# Neural Network
+
+
+caret_model_nnet <- train(Subtype ~ .,
+                     data = cancer_data3,
+                     method = "nnet", #changes to nnet for neural network
+                     metric = "Accuracy",
+                     trControl = myctrl)
+
+
+
+```
+
+```{r}
+caret_model_nnet
+
+ggplot(caret_model_nnet)
+
+#51.1% accuracy. Far worse than previous models.
+```
+
+_Putting together all the caret predictions together, it's evident to see that logBoost, random forest, linear discriminant analysis and rpart algorithms were all fairly efficient achieving an accuracy of over 65%. Again, that is not uncharacteristic considering the sheer amount of predictors we have, not all of them can be accurately predicted. Now, to consider specific analysis, we can use the functions within the respective packages rather than relying on the caret train() function and re-evaluate their accuracies._
+
+
+```{r}
+predict_cancer_nnet <- predict(caret_model_nnet, newdata = cancer_test) #As you can see, we're using the logBoost model generation through the caret package. Will only be done for logBoost since it has no external package.
+
+table_cancer_nnet <- table(Actual = cancer_test_truth, Predicted = predict_cancer_nnet)
+
+cmCancer_nnet <- confusionMatrix(table_cancer_nnet, reference = "Subtype")
+
+pltCancer_nnet <- as.data.frame(cmCancer_nnet$table)
+
+pltCancer_nnet$Predicted <- factor(pltCancer_nnet$Predicted, levels=rev(levels(pltCancer_nnet$Predicted)))
+
+#Let's plot the matrix and interpret it.
+
+```
+
+
+```{r}
+
+ggplot(pltCancer_nnet, aes(Predicted, Actual, fill= Freq)) + #Make confusion matrix, each value represents whether value was accurately predicted within the model
+        geom_tile() + geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="white", high="#009194") +
+        labs(x = "Reference",y = "Prediction", title = "Neural Network prediction of Subtypes")
+
+#Interpretation: As shown below, considering an initial accuracy display of 51%, it appears that neural net produces a near 100% accuracy for the subtype prediction. This demonstrates how important the predict function is, in which the test data references against generated predicted values, which may determine different accuracy than the one given within the caret model output. 96.6% Accuracy.
+```
+
+```{r}
+PRROC_obj_nnet <- roc.curve(scores.class0 = pltCancer_nnet$Predicted, weights.class0=pltCancer_nnet$Freq, curve = T)
+plot(PRROC_obj_nnet, main = "ROC curve - Neural Networks")
+```
+
+
+
+```{r}
+predict_cancer_nb <- predict(caret_model_nb, newdata = cancer_test) #As you can see, we're using the logBoost model generation through the caret package. Will only be done for logBoost since it has no external package.
+
+table_cancer_nb <- table(Actual = cancer_test_truth, Predicted = predict_cancer_nb)
+
+cmCancer_nb <- confusionMatrix(table_cancer_nb, reference = "Subtype")
+
+pltCancer_nb <- as.data.frame(cmCancer_nb$table)
+
+pltCancer_nb$Predicted <- factor(pltCancer_nb$Predicted, levels=rev(levels(pltCancer_nb$Predicted)))
+
+#Let's plot the matrix and interpret it.
+
+```
+
+
+```{r}
+
+ggplot(pltCancer_nb, aes(Predicted, Actual, fill= Freq)) + #Make confusion matrix, each value represents whether value was accurately predicted within the model
+        geom_tile() + geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="white", high="#009194") +
+        labs(x = "Reference",y = "Prediction", title = "Naive Bayes prediction of Subtypes")
+
+#Interpretation: The naive bayes model appears to have a 73.9% accuracy. It's errors in predictions appear to be 'one-off', essentially where there isn't a consistent error in prediction for one subtype over the other. This can be seen as all values with a number other than the diagonal only appear to be 1.
+
+```
+
+```{r}
+PRROC_obj_nb <- roc.curve(scores.class0 = pltCancer_nb$Predicted, weights.class0=pltCancer_nb$Freq, curve = T)
+plot(PRROC_obj_nb, main = "ROC curve - Naive Bayes")
+```
+
+
+
+
+
+
+
+```{r}
+#Let's run random forest on the training, testing and truth sets that we set up earlier (line 221).
+
+library(randomForest)
+
+set.seed(1234)
+
+cancer_rf <- randomForest(Subtype ~ ., data = cancer_train)
+
+
+```
+
+```{r}
+
+predict_cancer_rf <- predict(cancer_rf, cancer_test, type = "class")
+table_cancer_rf <- table(Actual = cancer_test_truth, Predicted = predict_cancer_rf)
+
+
+cmCancer_rf <- confusionMatrix(table_cancer_rf, reference = "Subtype")
+
+cmCancer_rf #60.9% accuracy using random forest. Similar to caret accuracy?
+
+
+pltCancer_rf <- as.data.frame(cmCancer_rf$table)
+pltCancer_rf$Predicted <- factor(pltCancer_rf$Predicted, levels=rev(levels(pltCancer_rf$Predicted)))
+#Let's plot the matrix and interpret it.
+```
+
+```{r}
+ggplot(pltCancer_rf, aes(Predicted, Actual, fill= Freq)) + #Make confusion matrix, each value represents whether value was accurately predicted within the model
+        geom_tile() + geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="white", high="#009194") +
+        labs(x = "Reference",y = "Prediction", title = "Random Forest prediction of cancer types")
+
+#Interpretation: 56% accuracy achieved by random forest. Confusion matrix displays all the actual values (using truth set which are actual values) against the prediction values (predicted using random forest). As we can see, random forest was highly effective in performing Luminal-A and basal-like prediction, while some Luminal-B actual values were highly split between a prediction of Luminal-B (correctly) and HER2-enriched. Does this tell us that HER-2 enriched subtypes may not be substantially different to Luminal-B subtypes? Is there a certain pattern that the random forest picks up that makes prediction difficult within the two subtypes? Fairly interesting observations made all around.
+```
+
+
+
+
+```{r}
+
+
+PRROC_obj_rf <- roc.curve(scores.class0 = pltCancer_rf$Predicted, weights.class0=pltCancer_rf$Freq, curve = T)
+plot(PRROC_obj_rf, main = "ROC curve - Random Forests")
+
+```
+
+
+
+
+
+```{r}
+predict_cancer_logB <- predict(caret_model_logBoost, newdata = cancer_test) #As you can see, we're using the logBoost model generation through the caret package. Will only be done for logBoost since it has no external package.
+
+table_cancer_logB <- table(Actual = cancer_test_truth, Predicted = predict_cancer_logB)
+
+cmCancer_logB <- confusionMatrix(table_cancer_logB, reference = "Subtype")
+
+pltCancer_logB <- as.data.frame(cmCancer_logB$table)
+
+pltCancer_logB$Predicted <- factor(pltCancer_logB$Predicted, levels=rev(levels(pltCancer_logB$Predicted)))
+
+#Let's plot the matrix and interpret it.
+
+```
+
+
+```{r}
+
+ggplot(pltCancer_logB, aes(Predicted, Actual, fill= Freq)) + #Make confusion matrix, each value represents whether value was accurately predicted within the model
+        geom_tile() + geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="white", high="#009194") +
+        labs(x = "Reference",y = "Prediction", title = "logBoost prediction of Cancer Types")
+
+#Interpretation: Fantastic results being shown by the logBoost predictor model. 100% accuracy, with every single variable being correctly predicted within the dataset. Hence, logBoost may be the most accurate prediction model to use.
+
+
+```
+
+
+
+```{r}
+#install.packages('pROC')
+
+PRROC_obj_logB <- roc.curve(scores.class0 = pltCancer_logB$Predicted, weights.class0=pltCancer_logB$Freq, curve = T)
+plot(PRROC_obj_logB,main = "ROC curve - Log Boosted")
+```
+
+
+
+
+```{r}
+# Rpart (CART Trees)
+
+
+caret_model_rpart <- train(Subtype ~ .,
+                     data = cancer_data3,
+                     method = "rpart", #changes to neural net for neural network
+                     metric = "Accuracy",
+                     trControl = myctrl)
+
+
+
+
+```
+
+
+
+```{r}
+predict_cancer_rpart <- predict(caret_model_rpart, newdata = cancer_test) #As you can see, we're using the logBoost model generation through the caret package. Will only be done for logBoost since it has no external package.
+
+table_cancer_rpart <- table(Actual = cancer_test_truth, Predicted = predict_cancer_rpart)
+
+cmCancer_rpart <- confusionMatrix(table_cancer_rpart, reference = "Subtype")
+
+pltCancer_rpart <- as.data.frame(cmCancer_rpart$table)
+
+pltCancer_rpart$Predicted <- factor(pltCancer_rpart$Predicted, levels=rev(levels(pltCancer_rpart$Predicted)))
+
+#Let's plot the matrix and interpret it.
+
+```
+
+
+```{r}
+
+ggplot(pltCancer_rpart, aes(Predicted, Actual, fill= Freq)) + #Make confusion matrix, each value represents whether value was accurately predicted within the model
+        geom_tile() + geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="white", high="#009194") +
+        labs(x = "Reference",y = "Prediction", title = "Rpart prediction of Cancer Types")
+
+#Interpretation: 52% accuracy
+
+
+```
+
+```{r}
+PRROC_obj_rpart <- roc.curve(scores.class0 = pltCancer_rpart$Predicted, weights.class0=pltCancer_rpart$Freq, curve = T)
+plot(PRROC_obj_rpart, main = "ROC curve - Rpart")
+```
+
+#CROSS VALIDATION
+
+_What needs to be done now is cross validation on the neural net and logboost prediction models. Though extremely good results, it is uncommon to have 100% accuracy using prediction models, hence cross validation occurs to check the validity of the model a 2nd time. This will be done by implementing a 5-fold cross-validation control, and a train/test split of 80%/20%._
+
+
+
+```{r}
+80*0.8
+
+80*0.2
+
+#64/16 split required
+```
+
+```{r}
+cancer_dataCross <- data.frame(cancer_data1, Subtype = cancer_data$PAM50.mRNA)
+
+cancer_dataCross <- cancer_dataCross[,-1] #remove TCGA-ID
+
+
+scrambled_indexCross <- sample(NROW(cancer_dataCross)) #mix up the rows 
+scrambled_cancerCross <- cancer_dataCross[scrambled_indexCross,] #using that index, rows should be mixed
+
+
+cancer_trainCross <- scrambled_cancerCross[1:64, ] #take 52 variables for training set (65%)
+cancer_testCross <- scrambled_cancerCross[65:80, -8671] #Take the final 35%, without the subtype column
+cancer_test_truthCross <- scrambled_cancerCross[65:80, 8671] #take the subtypes
+```
+
+
+
+```{r}
+myctrl1 <- trainControl(method = "cv",     
+                       number = 5,
+                       allowParallel = TRUE)
+
+#This is a cross validation, as utilised from the following resource. 
+#https://www.kaggle.com/chrisbow/breast-cancer-prediction-using-the-caret-package/notebook
+#That dataset, though analysing breast cancer, focuses on appearance factors rather than proteomes. Hence, the application here is different. However, the control method would be the way I'd do it. The trainControl method simply uses the cross-validation method (three-fold) to resample the data in effectively three lines. Summary and selection functions simply give the best possible resampling. Cross-validation is my preference since it's optimal for training models on limited data samples.
+
+```
+
+
+
+
+```{r}
+#LOG BOOST (as interpreted by the resource above)
+
+caret_model_logBoostCross <- train(Subtype ~ .,
+                     data = cancer_dataCross,
+                     method = "LogitBoost",
+                     metric = "Accuracy",
+                     trControl = myctrl1)
+
+
+```
+
+
+```{r}
+#Neural Network
+
+# caret_model_nnetCross <- train(Subtype ~ .,
+#                      data = cancer_dataCross,
+#                      method = "nnet",
+#                      metric = "Accuracy",
+#                      trControl = myctrl1)
+# 
+#There appears to be a running issue, hence we will only cross validate the log boost prediction
+
+```
+
+```{r}
+predict_cancer_logBCross <- predict(caret_model_logBoostCross, newdata = cancer_testCross) #As you can see, we're using the logBoost model generation through the caret package. Will only be done for logBoost since it has no external package.
+```
+
+```{r}
+table_cancer_logBCross <- table(Actual = cancer_test_truthCross, Predicted = predict_cancer_logBCross)
+
+cmCancer_logBCross <- confusionMatrix(table_cancer_logBCross, reference = "Subtype")
+
+pltCancer_logBCross <- as.data.frame(cmCancer_logBCross$table)
+
+pltCancer_logBCross$Predicted <- factor(pltCancer_logBCross$Predicted, levels=rev(levels(pltCancer_logBCross$Predicted)))
+
+#Let's plot the matrix and interpret it.
+
+```
+
+
+```{r}
+
+ggplot(pltCancer_logBCross, aes(Predicted, Actual, fill= Freq)) + #Make confusion matrix, each value represents whether value was accurately predicted within the model
+        geom_tile() + geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="white", high="#009194") +
+        labs(x = "Reference",y = "Prediction", title = "logBoost prediction of Cancer Types (80/20 Split)")
+
+#Interpretation: Cross-validation confirms that the 100% Accuracy remains. Effectively, we can confirm that log Boost is extremely accurate in predicting cancer subtype.
+
+```
+
+
+```{r}
+#We can use the $overall variable in each confusion matrix to output the given accuracies to 3 significant figures.
+
+#FOR THE CANCER DATA
+100*round(cmCancer_nnet$overall[1],3)
+100*round(cmCancer_logB$overall[1],3)
+100*round(cmCancer_rpart$overall[1],3)
+100*round(cmCancer_nb$overall[1],3)
+100*round(cmCancer_rf$overall[1],3)
+
+```
+
+```{r}
+accuracies <- resamples(list(logB=caret_model_logBoost, Rpart =caret_model_rpart, NB=caret_model_nb, RF = caret_model_randomForest, NNet = caret_model_nnet))
+
+dotplot(accuracies)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+_Below is further analysis not required in the final report._
+
+
+
+#HORMONE RECEPTOR PREDICTION
+
+
+```{r}
+#After having completed prediction on the above data regarding Subtypes with the PAM50 genome, we can cross-reference to prediction capabilities of current biomarkers: the hormone receptors. Essentially, by applying the same method, we can compare the predictive accuracy of the above models and determine if they are successful in predicting hormone receptors as good as subtypes.
+
+cancer_dataPR <- data.frame(cancer_data1, PRStatus = cancer_data$PR.Status)
+
+cancer_dataPR <- cancer_dataPR[,-1] #remove TCGA-ID
+
+
+scrambled_index1 <- sample(NROW(cancer_dataPR)) #mix up the rows 
+scrambled_cancer1<- cancer_dataER[scrambled_index1,] #using that index, rows should be mixed
+
+
+cancer_train1 <- scrambled_cancer1[1:52, ] #take 52 variables for training set (65%)
+cancer_test1 <- scrambled_cancer1[53:80, -8671] #Take the final 35%, without the subtype column
+cancer_test_truth1 <- scrambled_cancer1[53:80, 8671] #take the subtypes
+
+# cancer_dataER %>% 
+#   mutate(ERStatus = factor(ERStatus, 
+#                         labels = make.names(levels(ERStatus))))
+```
+
+
+```{r}
+caret_model_logBoostPR <- train(PRStatus ~ .,
+                     data = cancer_dataPR,
+                     method = "LogitBoost",
+                     metric = "Accuracy",
+                     trControl = myctrl)
+```
+
+```{r}
+predict_cancer_logBPR <- predict(caret_model_logBoostPR, newdata = cancer_test1) #As you can see, we're using the logBoost model generation through the caret package. Will only be done for logBoost since it has no external package.
+
+table_cancer_logBPR <- table(Actual = cancer_test_truth1, Predicted = predict_cancer_logBPR)
+
+cmCancer_logBPR <- confusionMatrix(table_cancer_logBPR, reference = "PRStatus")
+
+
+pltCancer_logBPR <- as.data.frame(cmCancer_logBPR$table)
+
+pltCancer_logBPR$Predicted <- factor(pltCancer_logBPR$Predicted, levels=rev(levels(pltCancer_logBPR$Predicted)))
+
+#Let's plot the matrix and interpret it.
+
+```
+
+
+```{r}
+
+ggplot(pltCancer_logBPR, aes(Predicted, Actual, fill= Freq)) + #Make confusion matrix, each value represents whether value was accurately predicted within the model
+        geom_tile() + geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="white", high="#009194") +
+        labs(x = "Reference",y = "Prediction", title = "logBoost prediction of PR Hormone Status")
+
+#Interpretation: Log Boost, again, produces 100% accuracy in determining progesterone receptors. This model effectively works for both subtypes and receptors equally.
+
+
+```
+
+```{r}
+PRROC_obj_logBPR <- roc.curve(scores.class0 = pltCancer_logBPR$Predicted, weights.class0=pltCancer_logBPR$Freq, curve = T)
+plot(PRROC_obj_logBPR, main = "ROC curve - Log Boost (Progesterone)")
+```
+
+
+```{r}
+caret_model_nbPR <- train(PRStatus ~ .,
+                     data = cancer_dataPR,
+                     method = "nb",
+                     metric = "Accuracy",
+                     trControl = myctrl)
+
+
+```
+
+```{r}
+predict_cancer_nbPR <- predict(caret_model_nbPR, newdata = cancer_test1) 
+
+table_cancer_nbPR <- table(Actual = cancer_test_truth1, Predicted = predict_cancer_nbPR)
+
+cmCancer_nbPR <- confusionMatrix(table_cancer_nbPR, reference = "PRStatus")
+
+pltCancer_nbPR <- as.data.frame(cmCancer_nbPR$table)
+
+pltCancer_nbPR$Predicted <- factor(pltCancer_nbPR$Predicted, levels=rev(levels(pltCancer_nbPR$Predicted)))
+
+#Let's plot the matrix and interpret it.
+
+```
+
+
+```{r}
+
+ggplot(pltCancer_nbPR, aes(Predicted, Actual, fill= Freq)) + #Make confusion matrix, each value represents whether value was accurately predicted within the model
+        geom_tile() + geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="white", high="#009194") +
+        labs(x = "Reference",y = "Prediction", title = "Naive Bayes prediction of PR Hormone Status")
+
+#Interpretation: An accuracy of 96.6% for naive bayes. Again this is quite good. It's important to consider that it would be far easier to predict correct values considering there are only two possible values to predict.
+
+
+```
+
+```{r}
+PRROC_obj_nbPR <- roc.curve(scores.class0 = pltCancer_nbPR$Predicted, weights.class0=pltCancer_nbPR$Freq, curve = T)
+plot(PRROC_obj_nbPR, main = "ROC curve - Naive Bayes (Progesterone)")
+```
+
+# Tumor Stage Prediction: The same way we predicted hormone status, we may do with cancer stages. logBoost will be applied considering it had perfect accuracy in previous instances.
+
+```{r}
+
+cancer_dataStage <- data.frame(cancer_data1, Stage = cancer_data$AJCC.Stage)
+
+cancer_dataStage <- cancer_dataStage[,-1] #remove TCGA-ID
+
+
+scrambled_indexStage <- sample(NROW(cancer_dataStage)) #mix up the rows 
+scrambled_cancerStage<- cancer_dataStage[scrambled_indexStage,] #using that index, rows should be mixed
+
+
+cancer_trainStage <- scrambled_cancerStage[1:40, ] #We can do a 50/50 train/test split for the final prediction
+cancer_testStage <- scrambled_cancerStage[41:80, -8671] #Take the final 35%, without the subtype column
+cancer_test_truthStage <- scrambled_cancerStage[41:80, 8671] #take the subtypes
+
+ cancer_dataStage %>% 
+   mutate(Stage = factor(Stage, 
+                         labels = make.names(levels(Stage))))
+```
+
+
+```{r}
+caret_model_logBoostStage <- train(Stage ~ .,
+                     data = cancer_dataStage,
+                     method = "LogitBoost",
+                     metric = "Accuracy",
+                     trControl = myctrl)
+```
+
+```{r}
+predict_cancer_logBStage <- predict(caret_model_logBoostStage, newdata = cancer_testStage) #As you can see, we're using the logBoost model generation through the caret package. Will only be done for logBoost since it has no external package.
+
+table_cancer_logBStage <- table(Actual = cancer_test_truthStage, Predicted = predict_cancer_logBStage)
+
+cmCancer_logBStage <- confusionMatrix(table_cancer_logBStage, reference = "PRStatus")
+
+
+pltCancer_logBStage <- as.data.frame(cmCancer_logBStage$table)
+
+pltCancer_logBStage$Predicted <- factor(pltCancer_logBStage$Predicted, levels=rev(levels(pltCancer_logBStage$Predicted)))
+
+#Let's plot the matrix and interpret it.
+
+```
+
+
+```{r}
+
+ggplot(pltCancer_logBStage, aes(Predicted, Actual, fill= Freq)) + #Make confusion matrix, each value represents whether value was accurately predicted within the model
+        geom_tile() + geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="white", high="#009194") +
+        labs(x = "Reference",y = "Prediction", title = "logBoost prediction of Cancer Stage") +
+   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+
+#Interpretation: 100% Accuracy given for cancer stages as well. It also confirms most values lie in Stage 2.
+
+
+```
+
+```{r}
+PRROC_obj_logBStage <- roc.curve(scores.class0 = pltCancer_logBStage$Predicted, weights.class0=pltCancer_logBStage$Freq, curve = T)
+plot(PRROC_obj_logBStage, main = "ROC curve - Log Boost (Stage)")
+```
+
+
+
+
+
+#UTILISING PCA FOR CLASSIFICATION PREDICTION - LINEAR DISCRIMINANT ANALYSIS/Random Forests
+
+_Considering previously that the dataset is far too large for lda to occur, we can now use the principal components to apply lda prediction and determine its accuracy through the ROC curve. We will utilise both lda and random forest native functions._
+
+
+```{r}
+cancer_data1_pca_pred <- cancer_data1_pca$x[,1:80]
+cancer_data1_pca_pred <- cbind(cancer_data1_pca_pred, as.numeric(cancer_data2$Subtype)-1)
+colnames(cancer_data1_pca_pred)[81] <- "Subtype"
+
+cancer_pca_pred_df <- as.data.frame(cancer_data1_pca_pred)
+
+```
+
+
+
+```{r}
+
+scrambled_index_pca <- sample(NROW(cancer_pca_pred_df)) #mix up the rows 
+scrambled_cancer_pca<- cancer_pca_pred_df[scrambled_index_pca,] #using that index, rows should be mixed
+
+cancer_train_pca <- scrambled_cancer_pca[1:52, ] #take 52 variables for training set (65%)
+cancer_test_pca <- scrambled_cancer_pca[53:80, -81] #Take the final 35%, without the subtype column
+cancer_test_truth_pca <- scrambled_cancer_pca[53:80, 81] #take the subtypes
+
+cancer_test_pca[,ncol(cancer_test_pca)] #Checks that our final column doesn't contain subtypes
+
+cancer_test_truth_pca #subtypes have been subsetted well
+
+```
+
+```{r}
+cancer_pca_lda <- lda(Subtype ~ PC1 + PC2 + PC3 + PC4 + PC5 + PC6, data = cancer_train_pca)
+cancer_pca_lda_predict <- predict(cancer_pca_lda, newdata = cancer_test_pca)
+```
+
+
+```{r}
+table_cancer_pca_lda <- table(Actual = cancer_test_truth_pca, Predicted = cancer_pca_lda_predict$class)
+
+cmCancer_pca_lda <- confusionMatrix(table_cancer_pca_lda, reference = "Subtype")
+
+pltCancer_pca_lda <- as.data.frame(cmCancer_pca_lda$table)
+
+pltCancer_pca_lda$Predicted <- factor(pltCancer_pca_lda$Predicted, levels=rev(levels(pltCancer_pca_lda$Predicted)))
+```
+
+```{r}
+ggplot(pltCancer_pca_lda, aes(Predicted, Actual, fill= Freq)) + #Make confusion matrix, each value represents whether value was accurately predicted within the model
+        geom_tile() + geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="white", high="#009194") +
+        labs(x = "Reference",y = "Prediction", title = "LDA prediction of cancer types (PCA)")
+```
+
+```{r}
+PRROC_obj_lda_pca <- roc.curve(scores.class0 = pltCancer_pca_lda$Predicted, weights.class0=pltCancer_pca_lda$Freq, curve = T)
+plot(PRROC_obj_lda_pca, main = "ROC curve - Linear Discriminant Analysis (on PCA)")
+
+#It's not unexpected that the values are not extremely accurate, essentially we are using 80 variables rather than 8000. As such dimensionality reduction allowed for a higher AUC value, though prediction is not as good.
+
+```
+
+```{r}
+#Finally, we can apply PCA to the progesterone receptor to see if it is distinguished enough from each other.
+
+cancer_data1_pca_PR <- prcomp(cancer_data1[, 2:8671]) #include only numerics, don't need TCGA ID
+
+names(cancer_data1_pca)
+
+#Let's make sense of these values. Center refers to the center point of the principal component (PC), sdev refers to its standard deviation while scale is the scaling of the PC. Rotation indicates the relationship (correlation) between the initial original values and its principal components while x refers to the sample value of the components relative to their initial values. 
+#https://www.datacamp.com/community/tutorials/pca-analysis-r
+```
+
+```{r}
+#Plotting PCA: 
+
+
+cancer_data_pc_PR <- data.frame(cancer_data1_pca_PR$x, PR.Status = cancer_data$PR.Status)
+
+cancer_Positive <- cancer_data_pc_PR[cancer_data_pc_PR$PR.Status == "Positive", ] #subsetting each type of cancer
+cancer_Negative <- cancer_data_pc_PR[cancer_data_pc_PR$PR.Status == "Negative", ]
+
+
+cancer_data_pc_PR
+
+
+```
+
+```{r}
+ggplot(cancer_data_pc_PR, aes(PC1, PC2, col = PR.Status)) +
+  geom_point(aes(shape = PR.Status), size = 4) +
+  coord_cartesian(xlim = 1.5 * c(min(cancer_data_pc_PR$PC1), max(cancer_data_pc_PR$PC1)),
+                  ylim = 1.5 * c(min(cancer_data_pc_PR$PC2), max(cancer_data_pc_PR$PC2))) +
+    geom_encircle(data = cancer_Positive, aes(x=PC1, y=PC2)) +   # draw circles
+   geom_encircle(data = cancer_Negative, aes(x=PC1, y=PC2) ) + 
+  theme_minimal() + 
+  labs(title = "Principal Component Analysis of Progesterone Status") #shortened for exporting (for poster)
+
+  
+#Taking a look at this PCA chart, there appears to be a strong clustering of each subtypes near the middle, and within each cluster there are multiple overlappings which could indicate some strong relationships and similar variation within each subtype. This could benefit health professionals as the values are similar, but the predictive modelling will be far more difficult (trivially, predicting similarity at such a small scale will be hard than clusters which are obviously different). 
+
+#More sepcifcally, HER2-enriched and Luminal A clusters appear nearly the same shape, Basal-like is generally the highest value while Luminal B contains some of the lowest value principal components, which exist outside the clusters of the other subtypes. Overall however, there appears to be many samples that fit many variables within the datapoints. Let's try PC3 vs PC4. Although PC1 vs PC2 charts are always the most significant (as they account for over 20% of the data's variation), it's still important to check a few more cluster plots to identify any smaller or more subtle relationships within each cancer subtype cluster.
+```
+
+

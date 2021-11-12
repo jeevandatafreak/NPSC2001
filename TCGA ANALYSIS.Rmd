@@ -1,0 +1,664 @@
+---
+title: "TCGA Analysis - Clinical Data"
+author: "Jeevanpreet Singh"
+date: "26/04/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+```{r}
+#install.packages('PACKAGE NAME HERE') if these do not load
+library(readr)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(ggalt)
+library(ggfortify)
+library(ggdendro)
+library(stringr)
+library(DataExplorer)
+library(caret)
+library(corrplot)
+```
+
+
+```{r}
+clinical_data <- read_csv("clinical_data_breast_cancer.csv")
+```
+
+```{r}
+plot_missing(clinical_data)
+sum(is.na(clinical_data))
+is.na(clinical_data)
+
+#94 N/A Values, all seem to be in the 'days until death' column, thus we should omit this column from analysis.
+
+clinical_data$`Days to date of Death` <- NULL
+```
+
+
+```{r}
+#str(clinical_data)
+#There are many character variables to work with which is difficult, therefore I'll change them to factor variables
+
+clinical_data[sapply(clinical_data, is.character)] <- lapply(clinical_data[sapply(clinical_data, is.character)], 
+                                       as.factor)
+
+str(clinical_data)
+#Confirms that character columns have been turned to factors.
+```
+
+
+```{r}
+
+names(clinical_data)<-str_replace_all(names(clinical_data), c(" " = "." , "," = "" ))
+
+#I noticed that each individual column name contained spaces, thus I quickly used the replace all function in the stringr package to ensure spaces are converted to dot points, and to further ensure that the csv was read in properly, I removed any extra commas.
+
+
+```
+
+
+
+#Data Visualisation
+
+
+
+```{r}
+plot_boxplot(clinical_data, "PAM50.mRNA")
+
+#This boxplot demonstrates the spread of values across different variables according to the subtype. The values here are of not much use, but we can see that age of diagnosis is earlier for basal-like while luminal and HER2-enriched cancer types have a similar mean and inter-quartile range.
+```
+```{r}
+clinical_data %>% ggplot(aes(x = PAM50.mRNA, y = Age.at.Initial.Pathologic.Diagnosis, colour = PAM50.mRNA)) +
+  geom_boxplot() +
+  labs(x = "Cancer Subtype", y = "Diagnosis Age", title = "Boxplot of Cancer Subtypes by Diagnosis Age")+
+ scale_fill_brewer(palette="RdPu") + theme_bw()
+
+#The boxplot confirms fair similarity within the subtypes. Through boxplots we can generate a lot of detail regarding what the data offers. Each section of the box and whisker plot displays 25% of the data, the whiskers being the lines at the end and the box being the white-space contained within the whiskers. Within the box is one distinct line that represents the median of values. Hence, the lines at the lower and upper end of the box are considered inter-quartile ranges, from 25% to 75%, thus 50% of the values are represented within the box and the other 50 within the whiskers. 
+
+#We can determine that he HER2-enriched cancer exression within the dataset is relatively normally distributed, hence why the median is near the middle of the box (assume middle of box is mean as it's directly between 25% and 75%). However, Luminal subtypes both appear to be right skewed, indicating that most cases will have a higher diagnosis age on average. Basal-like, however, is left-skewed, indicating a lower diagnosis age. This can imply the notion that premenopausal cancers are more likely to be Basal-like
+
+#This visualisation indicates that determining cancer subtypes and proteomic expressions are essential, as it may lead to earlier diagnosis for basal-like subtype patients, not dependent on the overall diagnosis age of all other subtypes. 
+
+#Let's determine if cancer stages provide a similar insight. Stages and subtypes differ in that stages show the development of cancer while subtypes (PAM50.mRNA) reflect the proteomic expression of the cancer. They are entirely different, but could be correlated.
+```
+
+```{r}
+clinical_data %>% ggplot(aes(x = AJCC.Stage, y = Age.at.Initial.Pathologic.Diagnosis, colour = AJCC.Stage)) +
+  geom_boxplot() +
+  labs(x = "AJCC Stage", y = "Diagnosis Age", title = "Boxplot of Cancer Stage by Diagnosis Age") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) + scale_fill_brewer(palette="RdPu") + theme_bw()
+
+#There is much more variation within the cancer stages. Stage 1 cancers can be identified much later throughout life, but stage 2 and stage 3 cancers are relatively found and middle-age period (50-65). Stage 4 however appears to have a diagnosis at a later age too. Considering the wide spread of the data and small sample within the dataset, it's impossible to consider any insights by this visualisation alone. A much better insight could be gathered within a dataset of 10000 samples rather than the 108 that we currently have. However, due to data access limitations and processing power, this may not be reproduced effectively.
+```
+
+```{r}
+clinical_data %>% ggplot(aes(x = ER.Status, y = Age.at.Initial.Pathologic.Diagnosis, colour = ER.Status)) +
+  geom_boxplot() +
+  labs(x = "Estrogen Status", y = "Diagnosis Age", title = "Boxplot of Estrogen by Diagnosis Age") + theme_bw()
+
+
+
+#READ FOLLOWING BOXPLOT FOR COMPARISON BETWEEN ESTROGEN AND PROGESTERONE COMPARISONS
+```
+
+```{r}
+clinical_data %>% ggplot(aes(x = PR.Status, y = Age.at.Initial.Pathologic.Diagnosis, colour = PR.Status)) +
+  geom_boxplot() + scale_fill_brewer(palette="RdPu") + theme_bw() +
+  labs(x = "Progesterone Status", y = "Diagnosis Age", title = "Boxplot of Progesterone by Diagnosis Age") 
+
+
+#Estrogen (ER) and progesterone (PR) are hormones, however hormones can have huge influence on cancer diagnosis. We can determine through both boxplots that their distributions are extremely similar. Both ER and PR negative status samples contain a left skew and overall lower distribution than the positive status samples. This could imply that hormones may play a part in 'delaying' the diagnosis of cancer within patients. Considering, however, that our focus lies mainly within subtypes, this does not tell us much in regards to proteomic prediction (predicting the cancer by protein expression).
+```
+
+
+
+
+
+
+
+```{r}
+ggplot(data = clinical_data, aes(x=PAM50.mRNA, fill = Gender)) + geom_bar() + labs (x="Breast Cancer Types", y = "Sum", title = "Breast Cancer Types") + scale_fill_brewer(palette="RdPu") + theme_bw()
+```
+
+```{r}
+par(mfrow = c(2,2))
+ggplot(data = clinical_data, aes(x=Tumor, fill = AJCC.Stage)) + geom_bar(position = "dodge") + labs (x="Tumor Stage", y = "Sum", title = "Cancer Stages") + scale_fill_brewer(palette="Set3") + theme_bw()
+
+#Most patients appear to be stage 2 cancer patients. This isn't abnormal, we would not expect many stage 4 and we would assume that most patients would be split in either stage 1 and stage 2. In this specific dataset, most individuals are stage 2. The fill of the graph simply indicates that the stage classification of AJCC (it's a more complex version of stage '1,2,3 and 4') is fairly consistent to the stages shown below, though there are some stage 4 cases in T2 and T3.
+
+```
+
+```{r}
+ggplot(data = clinical_data, aes(x=AJCC.Stage, fill = Gender)) + geom_bar(alpha = 0.8) + labs (x="AJCC Stage", y = "Sum", title = "Cancer Stages (AJCC)") + scale_fill_brewer(palette="RdPu") + theme_bw()#These demonstrates that AJCC is a more in depth stage classification.
+
+#A fairly normal distribution. As previously mentioned, there is not much purpose in having a dataset that is consistent in having the same amount of patients in every stage. Visualisations like these confirm that the patients selected to be displayed in the dataset are relatively random and will not cause any nuisance or interferences with further investigation.
+```
+
+
+```{r}
+ggplot(data = clinical_data, aes(x=PAM50.mRNA, fill = Tumor)) + geom_bar(alpha = 0.9) + labs (x="Breast Cancer Types", y = "Sum", title = "Breast Cancer Types")+ scale_fill_brewer(palette="RdPu") + theme_bw()
+
+#Tumor 2 (Stage 2) appears to be the most common within the dataset, while stage four is evidently the least common except for the luminal B cancer type. No Stage Four patient exists within the HER2-enriched cancer subtype.
+```
+
+```{r}
+ggplot(data = clinical_data, aes(x=PAM50.mRNA, fill = AJCC.Stage)) + geom_bar(alpha = 0.9, position = "dodge") + labs (x="Breast Cancer Types (PAM50 classification)", y = "Total", title = "Breast Cancer Subtypes")+ scale_fill_brewer(palette="Set3") + theme_bw()
+
+#Stage 2 remains the most common within the dataset, while stage four is evidently the least common except for the luminal B cancer type. Using some final visualisations, we should be able to conclude that AJCC is a better indicator for cancer stages.
+```
+
+```{r}
+
+ggplot(data=clinical_data, aes(x=Vital.Status , fill = Tumor)) + geom_bar(alpha = 0.6, position = "dodge") + labs(x = "Vital Status", y = "Total", title = "Vital Status Totals (split by subtypes and stages)") + scale_fill_brewer(palette="RdPu") + theme_bw()
+
+#In this plot we have effectively replotted the previous plot with the fill representing cancer stages. This further backs the notion of Stage 2 being the most common cancer within the dataset. The luminal A and B cancers appear to be the most apparent in the dataset, however the cancer stages within each subtype is consistent
+
+```
+
+```{r}
+
+ggplot(data=clinical_data, aes(x=Vital.Status , fill=PAM50.mRNA)) + geom_bar(alpha=0.8) +theme_bw() + labs(x = "Vital Status", y = "Total", title = "Vital Status Totals (subdivided by subtypes)") + scale_fill_brewer(palette="RdPu") + theme_bw()
+
+#Luminal B appears to be the most expressive cancer type within the dataset, i.e. the most common. 
+
+```
+```{r}
+ggplot(data=clinical_data, aes(x=Age.at.Initial.Pathologic.Diagnosis, fill=AJCC.Stage)) + geom_bar(alpha=0.8) + labs(x = "Age of Diagnosis", y = "Total") + scale_fill_brewer(palette="Set3") + theme_bw()
+
+#There is a fairly normal distribution of diagnosis age as we can see by the plot. This isn't abnormal, typically the cancer will develop within the 60-70 year old period, with more later age diagnosis than younger, hence the slight right skew.  The overall distribution of cancer types are fairly random, thus age cannot be a good indicator of which cancer stage you will develop. This may be further explored in the modelling of the proteome data. Maybe there is a high amount of specific protein expressions that are more dangerous as age develops. However, just by visualisation, we currently can't make any assumptions.
+
+```
+
+```{r}
+ggplot(data=clinical_data, aes(x=Age.at.Initial.Pathologic.Diagnosis, fill=PAM50.mRNA)) + geom_bar(alpha=0.8) + labs(x = "Age of Diagnosis", y = "Total") + scale_fill_brewer(palette="Set3") + theme_bw()
+
+#Checking the subtypes, there still seems to be a certain randomness within the age groups. Hence, age also doesn't indicate what subtype of cancer a patient will develop.
+```
+
+```{r}
+ggplot(data=clinical_data, aes(x=Age.at.Initial.Pathologic.Diagnosis, fill=PAM50.mRNA, color = AJCC.Stage)) + geom_bar(alpha=0.8) + labs(x = "Age of Diagnosis", y = "Total") + scale_fill_brewer(palette="Set3") + theme_bw()
+
+#Although the visualisation is fairly unpleasant, there is further indication that there is no correlation between age and cancer stage nor subtype. Hence, examining the protein expressions will help us understand if there is any relation at the molecular level.
+```
+
+
+
+
+```{r}
+clinical_data %>% ggplot(aes(HER2.Final.Status, fill = AJCC.Stage)) + geom_bar(alpha = 0.8, postion = "dodge") + scale_fill_brewer(palette="Set3") + theme_bw()
+```
+
+
+
+
+
+
+
+```{r} 
+#Let's Quickly check the importance of estrogen and progesterone presence.
+#What are the possible outcomes of each status
+
+levels(clinical_data$ER.Status)
+
+levels(clinical_data$PR.Status) 
+
+#Creating a table of the values
+
+clinicalERvsPR <- table(Estrogen = clinical_data$ER.Status,Progesterone = clinical_data$PR.Status)
+
+clinicalERvsPR
+
+
+#Adding specific table values
+
+
+doubleposneg <- clinicalERvsPR[2] + clinicalERvsPR[6]
+
+
+round(doubleposneg / sum(clinicalERvsPR), 2) * 100
+
+#87% of values are double positive/negative. In other words, if an individual has a estrogen-receptor positive result, there is a 86% chance that they may also be progesterone-receptor positive. These values are insignificant in comparison to the main four tumor types (luminal, basal-like, her-2), however, they help in understanding that there may be some correlation within the protein expressions of the data.
+
+slices <- c(86, 14 )
+lbls <- c("ER and PR Positive", "Not ER and PR Positive")
+pct <- round(slices/sum(slices)*100)
+lbls <- paste(lbls, pct)
+lbls <- paste(lbls,"%",sep="")
+pie(slices,labels = lbls, col=rainbow(length(lbls)),
+   main="Pie Chart Double +- Receptors")
+```
+
+```{r}
+brk = seq(min(clinical_data$Age.at.Initial.Pathologic.Diagnosis), max(clinical_data$Age.at.Initial.Pathologic.Diagnosis), 1)
+#lbls = paste0(as.character(c(seq(150, 0, -5), seq(5,150,5))), "m") 
+
+clinical_data %>% 
+  ggplot(aes(AJCC.Stage, Age.at.Initial.Pathologic.Diagnosis, fill = Gender))+
+  geom_bar(stat = "identity", width = 0.6) +
+  scale_y_continuous(breaks = brk) + #, labels = lbls) +
+  coord_flip() +
+  theme(axis.ticks = element_blank()) +
+  theme_tufte() +
+  scale_fill_brewer(palette = "Dark2")
+  
+
+```
+
+
+
+
+
+
+
+```{r}
+clinical_data$PAM50.mRNA <- as.character(clinical_data$PAM50.mRNA)
+
+SubtypedPlotAJCC <- clinical_data %>%
+            ggplot(aes(AJCC.Stage, Tumor, color = PAM50.mRNA)) +
+            geom_point(position = position_jitter(seed=123),
+                       shape = 4) +
+            facet_wrap(~ PAM50.mRNA) +
+            theme_classic() +
+  labs(x = "AJCC Stage",
+       y = "Tumor",
+       color = "Cancer Subtype") +
+   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+SubtypedPlotAJCC
+
+#There is a slight/weak linear correlation within the tumor stages within the specific subtypes. It should be as expected as the Tumor stages should align similarly to the AJCC classifications (which is simply a more indepth way of expressing the cancer stage). However, HER2-enriched appears to be more independent with random spread rather than the other three subtypes. Could there be any inconsistencies within the subclasses? If so, why is HER2-enriched the only subtype affected?
+
+```
+
+```{r}
+clinical_data$PAM50.mRNA <- as.character(clinical_data$PAM50.mRNA)
+
+SubtypedPlotAge <- clinical_data %>%
+            ggplot(aes(Age.at.Initial.Pathologic.Diagnosis, Tumor, color = PAM50.mRNA)) +
+            geom_point(position = position_jitter(seed=123),
+                       shape = 1) +
+            facet_wrap(~ PAM50.mRNA) +
+            theme_classic() +
+  labs(x = "Age at Diagnosis",
+       y = "Tumor",
+       color = "Cancer Subtype") +
+   theme(axis.text.x = element_text(angle = 15, vjust = 1, hjust = 1))
+SubtypedPlotAge
+
+#It appears that diagnosis at an older age increases likelihood of developing a stage four tumour. Now lets change the y-axis for the AJCC to see if the trend follows.
+
+```
+
+```{r}
+clinical_data$PAM50.mRNA <- as.character(clinical_data$PAM50.mRNA)
+
+SubtypedPlotAgeAJCC <- clinical_data %>%
+            ggplot(aes(Age.at.Initial.Pathologic.Diagnosis, AJCC.Stage, color = PAM50.mRNA)) +
+            geom_point(position = position_jitter(seed=123),
+                       shape = 1) +
+            facet_wrap(~ PAM50.mRNA) +
+            theme_classic() +
+  labs(x = "Age at Diagnosis",
+       y = "AJCC Stage",
+       color = "Cancer Subtype") +
+   theme(axis.text.x = element_text(angle = 15, vjust = 1, hjust = 1))
+SubtypedPlotAgeAJCC
+
+#There appears to be similarity, thus the issue of the different tumour stages has not affected these visualisations.
+
+```
+
+```{r}
+
+clinical_data$PAM50.mRNA <- as.character(clinical_data$PAM50.mRNA)
+
+SubtypedPlotmiRNAmethylClusters <- clinical_data %>%
+            ggplot(aes(miRNA.Clusters, methylation.Clusters, color = PAM50.mRNA)) +
+            geom_point(position = position_jitter(seed=123)) +
+            facet_wrap(~ PAM50.mRNA) +
+            theme_classic() +
+  labs(x = "miRNA Clustering",
+       y = "methylation Clustering",
+       color = "Cancer Subtype") +
+   theme(axis.text.x = element_text(angle = 15, vjust = 1, hjust = 1))
+SubtypedPlotmiRNAmethylClusters
+
+#Checking the clustering since these visualisations will become important later. It appears that the clustering for all subtypes appear dispersed except for basal-like. Within basal-like, the subtypes are almost all near 5 (jittering for aesthetically better appearance). There could be cluster relationships between the RNA sequence and methylation sequence for basal-like cancer subtypes.
+
+
+```
+
+
+
+```{r}
+clinical_data %>%
+            ggplot(aes(`Integrated.Clusters.(no.exp)`, `Integrated.Clusters.(unsup.exp)`, color = `Integrated.Clusters.(with.PAM50)`)) +
+            geom_point(position = position_jitter(seed=123)
+                      ) +
+            facet_wrap(~ PAM50.mRNA) +
+            theme_classic() +
+  labs(x = "Integrated Clusters (no exp)",
+       y = "Integrate Clusters (unsup exp)",
+       color = "Clustering (PAM50)") +
+   theme(axis.text.x = element_text(angle = 15, vjust = 1, hjust = 1))
+
+#Integrated Clusters are another form of classification for breast cancers. I simply checked whether the classifications remain consistent within the subtypes (unsup exp and no exp means supported and unsupported data, in which classifications go up to 5 and 4 respectively and are thus not identical.) Grouping with Integrated by PAM50.RNA indicates consistent subtypes. Basal-Like (top left) is dark, HER2-enriched is still dark except for one point, Luminal A is at stage 3 colour, Luminal B is consistenly bright except for one data point. Overall, the classifications are fairly consistent throughout the data. This is good, no omissions or transformation required.
+```
+
+_Having analysed this initial simple dataset, we have found certain trends in the data which may explain some of the results that will be predicted later on. However, there is no mention of protein expressions but rather their cluster expressions and the subtypes that these protein-specific receptors are attached to (ie. some proteins may exist on Luminal A cancers while they are absent on Basal-like cancers). We need an extended dataset, one that may give a better idea of protein expression in which we can implement our predictive modelling._
+
+
+```{r}
+proteomes_data_untouched <- read.csv("77_cancer_proteomes_CPTAC_itraq.csv")
+
+#This will be the untouched data of the more comprehensive dataset incase the values are too difficult to interpret (when we do cleaning on the dataset that we use.)
+```
+
+
+```{r}
+proteomes_data <- read.csv("77_cancer_proteomes_CPTAC_itraq.csv")
+
+dim(proteomes_data)  
+
+#Three factor variables, rest are numeric. Thus, no need for as.factor conversion (remember, we can't use character values in our code, must be changed to factors)
+
+nrow(proteomes_data)
+
+#over 12000 Patients with 86 variables. These variables are protein expressions, numerically represented as to present how much 'presence' they have. 
+
+```
+
+
+```{r}
+
+#NP refers to proteins but we do not want to analyse them as rows while TCGA codes are columns. This is because the previous simpler dataset (clinical_data) consisted of TCGA ID's as the rows, therefore we transpose this data to do the same. 
+
+numberedcols <- proteomes_data$RefSeq_accession_number
+
+
+#First three columns are not necessary in the analysis, they are simply nomenclature for proteins that we already know of. 
+proteomes_data <- as.data.frame(t(proteomes_data[,4:86]))
+
+```
+
+```{r}
+#reinsert the proteins as column names 
+
+
+colnames(proteomes_data) <- numberedcols
+
+
+
+#reinsert the TCGA ID's as column name #1. This makes the proteome dataset more similar to the clinical data, we could possibly now merge both datasets together to begin a deeper analysis for cancer prediction.
+
+
+proteomes_data <- cbind(rownames(proteomes_data), data.frame(proteomes_data, row.names=NULL))
+colnames(proteomes_data)[1] <- "Complete.TCGA.ID"
+
+
+
+```
+
+
+```{r}
+View(clinical_data)
+```
+```{r}
+View(proteomes_data)
+
+#These two functions should produce the dataframes in new windows. We can see that clinical data presents TCGA ID as TCGA-__-__ while the complex proteome dataset presents __-____-__TCGA. This will make data merging extremely difficult, therefore we create a function to select that specific characters and re-arrange the proteome dataset IDs to fit the clinical data IDs
+```
+
+
+```{r}
+#Creating a function. I have used functions previously. The substr() function substrings the variable data, in which the characters of are extracted and are replaced through the paste() function. Therefore it turns __-____-__TCGA into TCGA-__-__. 
+
+match.tcga <- function(proteome) {
+  x = substr(proteome, 4, 7)
+  y = substr(proteome, 0, 2)
+  paste("TCGA",y,x,sep="-")
+}
+
+
+#Using sapply, we simply re-arrange the way in which the TCGA data is represented
+proteomes_data$Complete.TCGA.ID <- sapply(proteomes_data$Complete.TCGA.ID, match.tcga)
+
+#update the dataframe with the changes (I found that not doing the code underneath deletes the column sometimes).
+
+proteomes_data <- proteomes_data
+
+#ONLY RUN THIS CODE CHUNK ONCE. VERY IMPORTANT
+
+View(proteomes_data)
+
+#We can see the TCGA ID formatting is now the same as the clinical data formatting
+```
+
+
+```{r}
+#To combine the datasets, we use an inner join by the TCGA ID column. This will be picked up automatically by the function (within the tidyr package). The new combined dataset will be named cancer_data
+
+
+cancer_data <- inner_join(proteomes_data, clinical_data)
+#View(cancer_data)
+dim(proteomes_data)
+dim(cancer_data)
+
+#We can see that the additional columns have been added. They are at the very end and thus can't be seen by View function.
+```
+
+
+```{r}
+sum(is.na(cancer_data)) 
+
+#There are 104131 NA values. We cannot just remove these because we must keep within the assumption that some patients will have cancer proteins that others do not, hence why they are considered NA. 
+```
+
+
+```{r}
+par(mfrow=c(2,2))
+plot(cancer_data$NP_958782)
+plot(cancer_data$NP_958785)
+plot(cancer_data$NP_958786)
+plot(cancer_data$NP_000436)
+
+#It is apparent that there are extreme similarities within the first few proteomes. This was expected as many cancer expressions should only differ and a very small decimal value (around 0.0001). 
+
+range(cancer_data$NP_958782)
+
+max(cancer_data$NP_958782) - min(cancer_data$NP_958782)
+
+#We can also see the range is about 4.7, indicating that the small differences within the expressions are normal. 
+```
+
+```{r}
+#A bit more cleaning, let's make another cancer data without the additional variables we added before with the bind. In other words, this will only be the 'transposed' protein expression data.
+
+cancer_data1 <- cancer_data[0:12554]
+
+#This will be useful for our actual analysis of protein expressions.
+
+sum(is.na(cancer_data1))
+sum(is.na(cancer_data1$NP_219494)/length(cancer_data1$NP_219494)) #let's check NA for one random proteome
+
+
+naVals <- colSums(is.na(cancer_data1)) / nrow(cancer_data1)
+
+cancer_data1[complete.cases(cancer_data1)]
+
+
+#Taking a random column, 67% of its data is NA. This kind of data will not be helpful in identifying cancer expressions, thus we need to set a limit to how much NA values we can take, and then convert these into a 0.
+```
+
+```{r}
+
+
+plot(sort(naVals, decreasing = FALSE), col ="black", type = 'h', xlab = "proteome", ylab="NA Values (% of entire length)", main = "NA values per proteome")
+
+#There are about 8000 proteomes with no NA values, but about 4500 with At least 5% of NA Values, lets get rid of these proteins. In this case, it would be logical to do so and would not incur any impact on the result of any analysis as there are thousands of proteins being tested in each patient and its not uncharacteristic for many of the extremely rare proteoms to not be present. As such, there is no requirement for them to be in the dataset.
+```
+
+```{r}
+
+sum( colSums(is.na(cancer_data1)) / nrow(cancer_data1) < 0.05)
+sum( colSums(is.na(cancer_data1)) / nrow(cancer_data1) > 0.05)
+
+
+keep <- ( colSums(is.na(cancer_data1)) / nrow(cancer_data1) < 0.05)
+
+cancer_data1 <- cancer_data1[ , keep]
+
+naVals1 <- colSums(is.na(cancer_data1)) / nrow(cancer_data1)
+
+plot(sort(naVals1, decreasing = FALSE), col ="black", type = 'h', xlab = "proteome", ylab="NA Values (% of entire length)", main = "NA values per proteome")
+
+#As we can see, there are barely anymore proteomes with a large amount of NA values. We have removed proteomes which have over 5% NA values. For the following NA values, we will adjust them according to the median of other values. This is not a terrible idea since the range of values are so small. Mean would also work but not as efficiently
+```
+
+```{r}
+for (i in which(sapply(cancer_data1, is.numeric))) {
+    cancer_data1[is.na(cancer_data1[, i]), i] <- median(cancer_data1[, i],  na.rm = TRUE)
+}
+
+
+naVals2 <- colSums(is.na(cancer_data1)) / nrow(cancer_data1)
+
+plot(sort(naVals2, decreasing = FALSE), col ="black", type = 'h', xlab = "proteome", ylab="NA Values (% of entire length)", main = "NA values per proteome")
+
+#No more NA values, all have been adjusted.
+```
+
+
+_Having successfully cleaned the data, ready for modelling and analysis, it would be most appropriate to continue visualising these datasets until we have a concrete idea as to what kind of predictive modelling would be suitable for this type of dataset._
+
+```{r}
+
+clinical_data$PAM50.mRNA <- as.factor(clinical_data$PAM50.mRNA)
+
+clinical_data %>%
+  ggplot(aes(methylation.Clusters,miRNA.Clusters )) +
+  geom_density2d_filled() +
+  geom_point(aes(shape = PAM50.mRNA) ) +
+  facet_wrap(~ PAM50.mRNA)
+
+#This initial clustering does not tell us much. The converted stage column is a shortened version of the AJCC.stage classification. Let's try that
+
+```
+
+```{r}
+
+clinical_data$PAM50.mRNA <- as.factor(clinical_data$PAM50.mRNA)
+
+clinical_data %>%
+  ggplot(aes(methylation.Clusters,miRNA.Clusters )) +
+  geom_density2d_filled() +
+  geom_point(aes(shape = PAM50.mRNA) ) +
+  facet_wrap(~ PR.Status)
+
+
+#Highly similar clusters, this makes it extremely difficult to distinguish clusters based on their hormone receptor.
+```
+
+
+```{r}
+clinical_data %>%
+  ggplot(aes(methylation.Clusters,miRNA.Clusters )) +
+  geom_density2d_filled() +
+  geom_point(aes(shape = PAM50.mRNA) ) +
+  facet_wrap(~ Converted.Stage)
+
+
+#Clustering should give us a general insight on whether the cancer subtypes are somehow connected in some way. The clusters tell us that there is some connection, in which levels are near the middle-right of the density plots, however overall there are still many differences. 
+```
+
+```{r}
+clinical_data %>%
+  ggplot(aes(`Integrated.Clusters.(no.exp)`,`Integrated.Clusters.(unsup.exp)` )) +
+  geom_density2d_filled() +
+  geom_point(aes(shape = PAM50.mRNA) ) +
+  facet_wrap(~ Converted.Stage)
+
+
+#Not much can be interpreted by the integrated clusters.There is no significant data point that is similarly reflected in every visualisation. We could possibly indicate some similarity at high level (yellow) for stage 1, stage 2a and stage 2b (they are all seemingly at (2,2-3) on the plots). This could indicate some similarity?
+```
+
+```{r}
+
+clinical_data %>%
+  ggplot(aes(CN.Clusters,`Integrated.Clusters.(with.PAM50)` )) +
+  geom_density2d_filled() +
+  geom_point(aes(shape = PAM50.mRNA) ) +
+  facet_wrap(~ Converted.Stage)
+
+#Again, not much can be interpreted here. It is at this point we can conclude that our second clustering plot gaves us the most insightful observations (Using converted stages rather than AJCC classification. Comments for that code are with that plot.
+```
+
+```{r}
+#min(clinical_data$methylation.Clusters)
+#max(clinical_data$methylation.Clusters)
+#min(clinical_data$miRNA.Clusters)
+#max(clinical_data$miRNA.Clusters) #for plot limits. Simply delete the hashtags if you'd like to run it.
+
+clinical_Basal <- clinical_data[clinical_data$PAM50.mRNA == "Basal-like", ] #subsetting each type of cancer
+clinical_LumA <- clinical_data[clinical_data$PAM50.mRNA == "Luminal A", ]
+clinical_LumB <- clinical_data[clinical_data$PAM50.mRNA == "Luminal B", ]
+clinical_HER2 <- clinical_data[clinical_data$PAM50.mRNA == "HER2-enriched", ]
+
+clinical_data %>% 
+  ggplot(aes(methylation.Clusters, miRNA.Clusters, shape = PAM50.mRNA), size = 1.5) +  #mapping x and y
+  geom_encircle(data = clinical_Basal, aes(x= methylation.Clusters, y= miRNA.Clusters, color = PAM50.mRNA)) + #draws circle for each cancer subtype
+  geom_encircle(data = clinical_LumA, aes(x=methylation.Clusters, y= miRNA.Clusters, color = PAM50.mRNA)) + 
+  geom_encircle(data = clinical_LumB, aes(x=methylation.Clusters, y= miRNA.Clusters, color = PAM50.mRNA)) +
+  geom_encircle(data = clinical_HER2, aes(x=methylation.Clusters, y= miRNA.Clusters, color = PAM50.mRNA)) +
+  coord_cartesian(xlim = c(0, 10), ylim = c(0, 10)) + #setting limits 
+  scale_fill_brewer(palette = "BrBG") + theme_bw()
+
+#We have simply encircled the clustering within each cancer subtypes, their colours can be seen below Through this cluster visualisation, there are clearly similarities within the cancer subtypes regarding which kind of clusters occur within each patient (remembering that we're dealing with mRNA, thus the use of the mRNA and methylation clusters). This visualisation can be compared in the future with principal component analysis of the proteomic expressions (simply a clustering analysis using the actual proteomic values rather than the cluster values).
+```
+```{r}
+par(pty = "s")
+clinical_Basal %>% ggplot(aes(x = PAM50.mRNA, y = Age.at.Initial.Pathologic.Diagnosis, colour = PAM50.mRNA)) +
+  geom_boxplot() +
+  labs(x = "Cancer Subtype", y = "Diagnosis Age", title = "Boxplot of Cancer Subtypes by Diagnosis Age")
+```
+
+```{r}
+
+#min(clinical_data$SigClust.Unsupervised.mRNA)
+#max(clinical_data$SigClust.Unsupervised.mRNA)
+#min(clinical_data$SigClust.Intrinsic.mRNA)
+#max(clinical_data$SigClust.Intrinsic.mRNA) determine limits
+
+
+
+clinical_data %>% 
+  ggplot(aes(SigClust.Unsupervised.mRNA, SigClust.Intrinsic.mRNA, shape = PAM50.mRNA), size = 1.5) +  #mapping x and y
+  geom_encircle(data = clinical_Basal, aes(x= SigClust.Unsupervised.mRNA, y= SigClust.Intrinsic.mRNA, color = PAM50.mRNA)) + #draws circle for each cancer subtype
+  geom_encircle(data = clinical_LumA, aes(x= SigClust.Unsupervised.mRNA, y= SigClust.Intrinsic.mRNA, color = PAM50.mRNA)) + 
+  geom_encircle(data = clinical_LumB, aes(x= SigClust.Unsupervised.mRNA, y= SigClust.Intrinsic.mRNA, color = PAM50.mRNA)) +
+  geom_encircle(data = clinical_HER2, aes(x= SigClust.Unsupervised.mRNA, y= SigClust.Intrinsic.mRNA, color = PAM50.mRNA)) +
+  coord_cartesian(xlim = c(-20, 5), ylim = c(-20, 5))  #setting limits
+
+
+#This visualisation demonstrates that the significant clusters are also quite consistent, there is a lot of overlapping within the clusters, meaning there could be relationships. These kind of analyses can help in dictating how medication can be described across multiple subtypes considering similar molecular composition. However, Principal Component analysis (PCA) will further analyse this).
+```
+_Having written over 600 lines of code and identifying as much as I could, I can now approach the modelling aspect of this project. We should begin with PCA as a segue, but first let's export all datasets within the global environment as CSV files and have them saved in the same directory._
+
+
+```{r}
+write.csv(clinical_data, "clinical_data.csv")
+write.csv(proteomes_data, "proteomes_data.csv")
+write.csv(proteomes_data_untouched, "proteomes_data_untouched.csv")
+write.csv(cancer_data, "cancer_data.csv")
+write.csv(cancer_data1, "cancer_data1.csv")
+```
+
+
+
+
+
